@@ -1,3 +1,5 @@
+![Python](https://img.shields.io/badge/Python-3-3776AB?logo=python&logoColor=white) ![github-fork](https://img.shields.io/badge/github-fork-181717?logo=github&logoColor=white)
+
 [![Contributors][contributors-shield]][contributors-url]
 [![Forks][forks-shield]][forks-url]
 [![Downloads][downloads-shield]][downloads-url]
