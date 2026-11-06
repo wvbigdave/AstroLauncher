@@ -6,6 +6,7 @@ verify_ssl = true
 [dev-packages]
 autopep8 = "*"
 pylint = "*"
+pyinstaller = "*"
 pywin32-ctypes = "*"
 
 [packages]
@@ -13,13 +14,11 @@ psutil = "*"
 watchdog = "*"
 colorlog = "*"
 tornado = "*"
-asyncio = "*"
 ipy = "*"
 pathvalidate = "*"
 pypakparser = "==1.2.0"
-pyinstaller = "*"
 packaging = "*"
 chardet = "*"
 
 [requires]
-python_version = "3.7"
+python_version = "3.10"

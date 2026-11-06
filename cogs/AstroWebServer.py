@@ -1,37 +1,35 @@
+"""Tornado web/websocket server for the AstroLauncher admin UI."""
 
 import datetime
 import hashlib
 import logging
-import ntpath
-# import os
+import os
 import secrets
 import sys
 import uuid
-# from pprint import pprint
 from threading import Thread
 
 import pathvalidate
+import tornado.escape
+import tornado.ioloop
 import tornado.web
 import tornado.websocket
 
-from AstroLauncher import AstroLauncher
 from cogs import UIModules
 from cogs.AstroLogging import AstroLogging
 from cogs.MultiConfig import MultiConfig
 
-# pylint: disable=abstract-method,attribute-defined-outside-init,no-member
-
 
 class WebServer(tornado.web.Application):
     def __init__(self, launcher):
-        logging.getLogger('tornado.access').disabled = True
+        logging.getLogger("tornado.access").disabled = True
         self.launcher = launcher
         self.port = self.launcher.launcherConfig.WebServerPort
         self.ssl = False
         curDir = self.launcher.launcherPath
         if self.launcher.isExecutable:
             curDir = sys._MEIPASS
-        self.assetDir = ntpath.join(curDir, "assets")
+        self.assetDir = os.path.join(curDir, "assets")
 
         self.connections = {}
         self.iterTimer = None
@@ -40,11 +38,9 @@ class WebServer(tornado.web.Application):
         self.cookieSecret = secrets.token_hex(16).encode()
         self.passwordHash = self.launcher.launcherConfig.WebServerPasswordHash
         cfgOvr = {}
-        self.baseURL = self.launcher.launcherConfig.WebServerBaseURL.rstrip(
-            "/")
+        self.baseURL = self.launcher.launcherConfig.WebServerBaseURL.rstrip("/")
         self.baseURL = self.baseURL.replace("\\", "/")
-        if self.baseURL != self.launcher.launcherConfig.WebServerBaseURL.rstrip(
-                "/"):
+        if self.baseURL != self.launcher.launcherConfig.WebServerBaseURL.rstrip("/"):
             cfgOvr["WebServerBaseURL"] = self.baseURL
 
         if self.baseURL != "" and not self.baseURL.startswith("/"):
@@ -60,44 +56,37 @@ class WebServer(tornado.web.Application):
             self.launcher.refresh_launcher_config()
 
         settings = {
-            'autoreload': True,
+            "autoreload": True,
             "static_path": self.assetDir,
-            "static_url_prefix": self.baseURL+"/static/",
+            "static_url_prefix": self.baseURL + "/static/",
             "cookie_secret": self.cookieSecret,
             "login_url": "/login",
             "ui_modules": UIModules,
             "websocket_ping_interval": 0,
-            "default_handler_class": NotFoundHandler
+            "default_handler_class": NotFoundHandler,
         }
 
-        thandlers = [(r'', MainAltHandler,
-                      dict(path=settings['static_path'], launcher=self.launcher)),
-                     (r'/', MainHandler,
-                      dict(path=settings['static_path'], launcher=self.launcher)),
-                     (r"/login", LoginHandler,
-                      dict(path=settings['static_path'], launcher=self.launcher)),
-                     (r'/logout', LogoutHandler, dict(launcher=self.launcher)),
-                     (r"/ws", APIWebSocket, dict(launcher=self.launcher)),
-                     (r"/api", APIRequestHandler, dict(launcher=self.launcher)),
-                     (r"/api/savegame", SaveRequestHandler,
-                      dict(launcher=self.launcher)),
-                     (r"/api/savegame/load", LoadSaveRequestHandler,
-                      dict(launcher=self.launcher)),
-                     (r"/api/savegame/delete", DeleteSaveRequestHandler,
-                      dict(launcher=self.launcher)),
-                     (r"/api/savegame/rename", RenameSaveRequestHandler,
-                      dict(launcher=self.launcher)),
-                     (r"/api/reboot", RebootRequestHandler,
-                      dict(launcher=self.launcher)),
-                     (r"/api/shutdown", ShutdownRequestHandler,
-                      dict(launcher=self.launcher)),
-                     (r"/api/player", PlayerRequestHandler,
-                      dict(launcher=self.launcher)),
-                     (r"/api/newsave", NewSaveRequestHandler,
-                      dict(launcher=self.launcher)),
-                     (r"/api/"+launcher.launcherConfig.RODataURL, RODataRequestHandler,
-                      dict(launcher=self.launcher))
-                     ]
+        thandlers = [
+            (r"", MainAltHandler, dict(path=settings["static_path"], launcher=self.launcher)),
+            (r"/", MainHandler, dict(path=settings["static_path"], launcher=self.launcher)),
+            (r"/login", LoginHandler, dict(path=settings["static_path"], launcher=self.launcher)),
+            (r"/logout", LogoutHandler, dict(launcher=self.launcher)),
+            (r"/ws", APIWebSocket, dict(launcher=self.launcher)),
+            (r"/api", APIRequestHandler, dict(launcher=self.launcher)),
+            (r"/api/savegame", SaveRequestHandler, dict(launcher=self.launcher)),
+            (r"/api/savegame/load", LoadSaveRequestHandler, dict(launcher=self.launcher)),
+            (r"/api/savegame/delete", DeleteSaveRequestHandler, dict(launcher=self.launcher)),
+            (r"/api/savegame/rename", RenameSaveRequestHandler, dict(launcher=self.launcher)),
+            (r"/api/reboot", RebootRequestHandler, dict(launcher=self.launcher)),
+            (r"/api/shutdown", ShutdownRequestHandler, dict(launcher=self.launcher)),
+            (r"/api/player", PlayerRequestHandler, dict(launcher=self.launcher)),
+            (r"/api/newsave", NewSaveRequestHandler, dict(launcher=self.launcher)),
+            (
+                r"/api/" + launcher.launcherConfig.RODataURL,
+                RODataRequestHandler,
+                dict(launcher=self.launcher),
+            ),
+        ]
 
         handlers = []
         for h in thandlers:
@@ -113,39 +102,49 @@ class WebServer(tornado.web.Application):
         if self.launcher.launcherConfig.EnableWebServerSSL:
             certFile = self.launcher.launcherConfig.SSLCertFile
             keyFile = self.launcher.launcherConfig.SSLKeyFile
-            if ntpath.exists(keyFile) and ntpath.exists(certFile):
+            if os.path.exists(keyFile) and os.path.exists(certFile):
                 self.ssl = True
             else:
                 AstroLogging.logPrint(
-                    "No SSL Certificates specified. Defaulting to HTTP", "warning")
+                    "No SSL Certificates specified. Defaulting to HTTP", "warning"
+                )
         if self.ssl:
             sslPort = self.launcher.launcherConfig.SSLPort
             ssl_options = {
-                "certfile": ntpath.join(self.launcher.launcherPath, certFile),
-                "keyfile": ntpath.join(self.launcher.launcherPath, keyFile),
+                "certfile": os.path.join(self.launcher.launcherPath, certFile),
+                "keyfile": os.path.join(self.launcher.launcherPath, keyFile),
             }
             self.listen(sslPort, ssl_options=ssl_options)
-            url = f"https://localhost{':'+str(sslPort) if sslPort != 443 else ''}{self.baseURL+'/' if self.baseURL else ''}"
+            url = (
+                f"https://localhost{':' + str(sslPort) if sslPort != 443 else ''}"
+                f"{self.baseURL + '/' if self.baseURL else ''}"
+            )
         else:
             self.listen(self.port)
-            url = f"http://localhost{':'+str(self.port) if self.port != 80 else ''}{self.baseURL+'/' if self.baseURL else ''}"
+            url = (
+                f"http://localhost{':' + str(self.port) if self.port != 80 else ''}"
+                f"{self.baseURL + '/' if self.baseURL else ''}"
+            )
         AstroLogging.logPrint(f"Running a web server at {url}")
         if self.passwordHash == "":
             AstroLogging.logPrint(
-                f"SECURITY ALERT: Visit {url} to set your password!", "warning")
+                f"SECURITY ALERT: Visit {url} to set your password!", "warning"
+            )
         tornado.ioloop.IOLoop.instance().start()
 
-    def iterWebSocketConnections(self, force=False):
+    def iterWebSocketConnections(self, force=False):  # noqa: N802
         try:
             if len(self.connections) > 0:
-                if self.iterTimer is None or (datetime.datetime.now() - self.iterTimer).total_seconds() > 1:
+                if self.iterTimer is None or (
+                    datetime.datetime.now() - self.iterTimer
+                ).total_seconds() > 1:
                     for _, conn in self.connections.items():
                         try:
                             conn[1].check_data_change(force=force)
-                        except:
+                        except Exception:  # noqa: BLE001
                             pass
                     self.iterTimer = datetime.datetime.now()
-        except:
+        except Exception:  # noqa: BLE001
             pass
 
     @staticmethod
@@ -154,18 +153,16 @@ class WebServer(tornado.web.Application):
         cID = f"{uuid.uuid4()}"
         if not isinstance(handler, APIWebSocket):
             if not client:
-                handler.set_secure_cookie(
-                    "client", bytes(cID, 'utf-8'))
-                client = cID
-                return client
+                handler.set_secure_cookie("client", bytes(cID, "utf-8"))
+                return cID
+            return client
         else:
             if client:
                 return (1, client)
-            else:
-                return (0, cID)
+            return (0, cID)
 
     @staticmethod
-    def gen_api_data(handler, force=False):
+    def gen_api_data(handler, force=False):  # noqa: N802
         isAdmin = handler.current_user == b"admin"
 
         dedicatedServer = handler.launcher.DedicatedServer
@@ -173,19 +170,18 @@ class WebServer(tornado.web.Application):
         logs = AstroLogging.log_stream.getvalue()
 
         n = 200
-        groups = logs.split('\n')
-        logs = '\n'.join(groups[-n:])
+        groups = logs.split("\n")
+        logs = "\n".join(groups[-n:])
         rconReady = False
         if dedicatedServer.AstroRCON:
             rconReady = dedicatedServer.AstroRCON.connected
-        
-        
+
         s = dedicatedServer.settings
         stats = None
         if dedicatedServer.DSServerStats:
             stats = dedicatedServer.DSServerStats.copy()
-            stats['averageFPS'] = round(stats['averageFPS'])
-            del stats['secondsInGame']
+            stats["averageFPS"] = round(stats["averageFPS"])
+            stats.pop("secondsInGame", None)
         res = {
             "forceUpdate": force,
             "viewers": len(handler.WS.connections),
@@ -194,7 +190,7 @@ class WebServer(tornado.web.Application):
             "status": dedicatedServer.status,
             "rready": rconReady,
             "stats": stats,
-            "server_version":handler.launcher.cur_server_version,
+            "server_version": handler.launcher.cur_server_version,
             "hasUpdate": handler.launcher.hasUpdate,
             "settings": {
                 "MaxServerFramerate": s.MaxServerFramerate,
@@ -202,7 +198,7 @@ class WebServer(tornado.web.Application):
                 "ServerName": s.ServerName,
                 "MaximumPlayerCount": s.MaximumPlayerCount,
                 "OwnerName": s.OwnerName,
-                "Port": s.Port
+                "Port": s.Port,
             },
             "players": dedicatedServer.players,
         }
@@ -210,7 +206,7 @@ class WebServer(tornado.web.Application):
         # only send full logs if admin
         if isAdmin:
             res["logs"] = logs
-            res['savegames'] = dedicatedServer.DSListGames
+            res["savegames"] = dedicatedServer.DSListGames
         else:
             res["logs"] = ""
 
@@ -219,10 +215,7 @@ class WebServer(tornado.web.Application):
 
 class NotFoundHandler(tornado.web.RequestHandler):
     def prepare(self):  # for all methods
-        raise tornado.web.HTTPError(
-            status_code=404,
-            reason="Invalid resource path."
-        )
+        raise tornado.web.HTTPError(status_code=404, reason="Invalid resource path.")
 
 
 class BaseHandler(tornado.web.RequestHandler):
@@ -242,28 +235,23 @@ class APIRequestHandler(BaseHandler):
 
 class APIWebSocket(tornado.websocket.WebSocketHandler):
     def __init__(self, *args, **kwargs):
-        self.launcher = kwargs.pop('launcher')
+        self.launcher = kwargs.pop("launcher")
         self.WS = self.launcher.webServer
         self.isOpen = False
         self.oldData = {}
-        # print('initializing websocket')
+        self.cID = None
         super().__init__(*args, **kwargs)
 
     def get_current_user(self):
         return self.get_secure_cookie("login")
-    # pylint: disable=arguments-differ
 
     def open(self):
-        # print("WebSocket opened")
-
         cType, self.cID = self.WS.get_client_id(self)
         self.isOpen = True
         if cType:
             self.WS.connections[self.cID] = [1, self]
         else:
             self.WS.connections[self.cID] = [0, self]
-        # print("open")
-        # pprint(self.WS.connections)
         self.check_data_change(force=True)
 
     def on_message(self, message):
@@ -271,18 +259,14 @@ class APIWebSocket(tornado.websocket.WebSocketHandler):
 
     def on_close(self):
         self.isOpen = False
-
         try:
             if self.cID:
                 del self.WS.connections[self.cID]
-        except:
+        except Exception:  # noqa: BLE001
             pass
-        # print("close")
-        # pprint(self.WS.connections)
         self.check_data_change(force=True)
-        # print("WebSocket closed")
 
-    def check_data_change(self, force=False):
+    def check_data_change(self, force=False):  # noqa: N802
         if force:
             self.oldData = {}
         newData = WebServer.gen_api_data(self, force=force)
@@ -292,36 +276,34 @@ class APIWebSocket(tornado.websocket.WebSocketHandler):
 
 
 class MainAltHandler(BaseHandler):
-    # pylint: disable=arguments-differ
     def initialize(self, path, launcher):
         self.path = path
         self.launcher = launcher
         self.WS = self.launcher.webServer
 
     def get(self):
-        self.redirect(self.WS.baseURL+"/")
+        self.redirect(self.WS.baseURL + "/")
 
 
 class MainHandler(BaseHandler):
-    # pylint: disable=arguments-differ
     def initialize(self, path, launcher):
         self.path = path
         self.launcher = launcher
         self.WS = self.launcher.webServer
 
-    # @tornado.web.authenticated
     def get(self):
         self.WS.get_client_id(self)
         if not self.application.passwordHash == "":
-            self.render(ntpath.join(self.path, 'index.html'),
-                        isAdmin=self.current_user == b"admin",
-                        launcher=self.launcher)
+            self.render(
+                os.path.join(self.path, "index.html"),
+                isAdmin=self.current_user == b"admin",
+                launcher=self.launcher,
+            )
         else:
-            self.redirect(self.WS.baseURL+"/login")
+            self.redirect(self.WS.baseURL + "/login")
 
 
 class LoginHandler(BaseHandler):
-    # pylint: disable=arguments-differ
     def initialize(self, path, launcher):
         self.path = path
         self.launcher = launcher
@@ -330,68 +312,61 @@ class LoginHandler(BaseHandler):
     def get(self):
         self.WS.get_client_id(self)
         if not self.current_user == b"admin":
-            self.render(ntpath.join(self.path, 'login.html'),
-                        isAdmin=self.current_user == b"admin",
-                        hashSet=not self.application.passwordHash == "",
-                        launcher=self.launcher)
+            self.render(
+                os.path.join(self.path, "login.html"),
+                isAdmin=self.current_user == b"admin",
+                hashSet=not self.application.passwordHash == "",
+                launcher=self.launcher,
+            )
         else:
-            self.redirect(self.WS.baseURL+"/")
+            self.redirect(self.WS.baseURL + "/")
 
     def post(self):
         self.WS.get_client_id(self)
         if self.application.passwordHash == "":
             # write hash
             self.application.passwordHash = hashlib.sha256(
-                bytes(self.get_argument("password"), 'utf-8')
+                bytes(self.get_argument("password"), "utf-8")
             ).hexdigest()
-            lfcg = AstroLauncher.LauncherConfig(
-                WebServerPasswordHash=self.application.passwordHash)
+            lfcg = self.application.launcher.LauncherConfig(
+                WebServerPasswordHash=self.application.passwordHash
+            )
             self.application.launcher.refresh_launcher_config(lfcg)
-            self.redirect(self.WS.baseURL+"/login")
+            self.redirect(self.WS.baseURL + "/login")
         else:
             # check hash
             sendHash = hashlib.sha256(
-                bytes(self.get_argument("password"), 'utf-8')
+                bytes(self.get_argument("password"), "utf-8")
             ).hexdigest()
             if sendHash == self.application.passwordHash:
-                self.set_secure_cookie("login", bytes(
-                    "admin", 'utf-8'))
-                self.redirect(self.WS.baseURL+"/")
+                self.set_secure_cookie("login", bytes("admin", "utf-8"))
+                self.redirect(self.WS.baseURL + "/")
             else:
-                self.redirect(self.WS.baseURL+"/login")
+                self.redirect(self.WS.baseURL + "/login")
 
 
 class LogoutHandler(BaseHandler):
     def get(self):
         self.WS.get_client_id(self)
-        self.clear_cookie('login')
-        self.redirect(self.WS.baseURL+"/")
+        self.clear_cookie("login")
+        self.redirect(self.WS.baseURL + "/")
 
 
 class RODataRequestHandler(BaseHandler):
     def get(self):
-        # ip = self.request.headers.get("X-Real-IP") or \
-        #    self.request.headers.get("X-Forwarded-For") or \
-        #    self.request.remote_ip
-        # if ip == "::1":
-        evt = self.get_argument('evt')
-        msg = self.get_argument('msg')
-        name = self.get_argument('name')
+        evt = self.get_argument("evt")
+        msg = self.get_argument("msg")
+        name = self.get_argument("name")
         if evt == "chat" or evt == "cmd":
-            AstroLogging.logPrint(
-                msg, msgType=evt, playerName=name, dwet="c")
+            AstroLogging.logPrint(msg, msgType=evt, playerName=name, dwet="c")
         self.write({"message": "Success"})
-        # else:
-        # print(f"{ip} Tried to send fake chat message")
-        # self.write({"message": "Error"})
 
 
 class SaveRequestHandler(BaseHandler):
     def post(self):
         self.WS.get_client_id(self)
         if self.current_user == b"admin":
-            t = Thread(
-                target=self.launcher.DedicatedServer.saveGame, args=())
+            t = Thread(target=self.launcher.DedicatedServer.saveGame, args=())
             t.daemon = True
             t.start()
             self.write({"message": "Success"})
@@ -403,8 +378,7 @@ class NewSaveRequestHandler(BaseHandler):
     def post(self):
         self.WS.get_client_id(self)
         if self.current_user == b"admin":
-            t = Thread(
-                target=self.launcher.DedicatedServer.newSaveGame, args=())
+            t = Thread(target=self.launcher.DedicatedServer.newSaveGame, args=())
             t.daemon = True
             t.start()
             self.write({"message": "Success"})
@@ -420,9 +394,10 @@ class LoadSaveRequestHandler(BaseHandler):
             if "save" in data and data["save"] is not None:
                 saveData = data["save"]
                 GL = self.launcher.DedicatedServer.DSListGames
-                if saveData['name'] != GL['activeSaveName']:
+                if saveData["name"] != GL["activeSaveName"]:
                     t = Thread(
-                        target=self.launcher.DedicatedServer.loadSaveGame, args=(saveData,))
+                        target=self.launcher.DedicatedServer.loadSaveGame, args=(saveData,)
+                    )
                     t.daemon = True
                     t.start()
             self.write({"message": "Success"})
@@ -437,8 +412,7 @@ class DeleteSaveRequestHandler(BaseHandler):
             data = tornado.escape.json_decode(self.request.body)
             if "save" in data and data["save"] is not None:
                 saveData = data["save"]
-                t = Thread(
-                    target=self.launcher.DedicatedServer.deleteSaveGame, args=(saveData,))
+                t = Thread(target=self.launcher.DedicatedServer.deleteSaveGame, args=(saveData,))
                 t.daemon = True
                 t.start()
             self.write({"message": "Success"})
@@ -452,15 +426,24 @@ class RenameSaveRequestHandler(BaseHandler):
         fData = False
         if self.current_user == b"admin":
             data = tornado.escape.json_decode(self.request.body)
-            if "nName" in data and data["nName"] is not None and "save" in data and data["save"] is not None:
+            if (
+                "nName" in data
+                and data["nName"] is not None
+                and "save" in data
+                and data["save"] is not None
+            ):
                 oldSave = data["save"]
                 newSaveName = data["nName"]
 
-                if pathvalidate.is_valid_filename(oldSave['name']) and pathvalidate.is_valid_filename(newSaveName):
+                if pathvalidate.is_valid_filename(oldSave["name"]) and pathvalidate.is_valid_filename(
+                    newSaveName
+                ):
                     GL = self.launcher.DedicatedServer.DSListGames
-                    if newSaveName not in [x['name'] for x in GL['gameList']]:
+                    if newSaveName not in [x["name"] for x in GL["gameList"]]:
                         t = Thread(
-                            target=self.launcher.DedicatedServer.renameSaveGame, args=(oldSave, newSaveName))
+                            target=self.launcher.DedicatedServer.renameSaveGame,
+                            args=(oldSave, newSaveName),
+                        )
                         t.daemon = True
                         t.start()
                     else:
@@ -476,16 +459,14 @@ class RenameSaveRequestHandler(BaseHandler):
 
         if fData:
             cID = self.WS.get_client_id(self)
-            self.WS.connections[cID].check_data_change(
-                force=True)
+            self.WS.connections[cID].check_data_change(force=True)
 
 
 class RebootRequestHandler(BaseHandler):
     def post(self):
         self.WS.get_client_id(self)
         if self.current_user == b"admin":
-            t = Thread(
-                target=self.launcher.DedicatedServer.save_and_shutdown, args=())
+            t = Thread(target=self.launcher.DedicatedServer.save_and_shutdown, args=())
             t.daemon = True
             t.start()
             self.write({"message": "Success"})
@@ -498,7 +479,9 @@ class ShutdownRequestHandler(BaseHandler):
         self.WS.get_client_id(self)
         if self.current_user == b"admin":
             t = Thread(
-                target=self.launcher.DedicatedServer.kill_server, args=("Website Request", True))
+                target=self.launcher.DedicatedServer.kill_server,
+                args=("Website Request", True),
+            )
             t.daemon = True
             t.start()
             self.write({"message": "Success"})
@@ -511,8 +494,8 @@ class PlayerRequestHandler(BaseHandler):
         self.WS.get_client_id(self)
         data = tornado.escape.json_decode(self.request.body)
         try:
-            players = self.launcher.DedicatedServer.players['playerInfo']
-        except:
+            players = self.launcher.DedicatedServer.players["playerInfo"]
+        except Exception:  # noqa: BLE001
             return
         playerGUID = None
         playerName = None
@@ -521,17 +504,18 @@ class PlayerRequestHandler(BaseHandler):
             playerGUID = data["guid"]
 
         if playerGUID:
-            player = [x for x in players if x['playerGuid']
-                      == playerGUID][0]
-            playerName = player["playerName"]
+            try:
+                player = [x for x in players if x["playerGuid"] == playerGUID][0]
+                playerName = player["playerName"]
+            except IndexError:
+                playerName = None
             if playerName == "":
                 playerName = None
         if "name" in data:
             playerName = data["name"]
             try:
-                player = [x for x in players if x['playerName']
-                          == playerName][0]
-            except:
+                player = [x for x in players if x["playerName"] == playerName][0]
+            except IndexError:
                 pass
         if playerGUID is None and playerName is None:
             self.write({"message": "Missing variable! (name or guid)"})
@@ -541,79 +525,90 @@ class PlayerRequestHandler(BaseHandler):
             self.write({"message": "Cannot touch the Owner!"})
             return
         if playerName in self.launcher.DedicatedServer.stripPlayers:
-            self.launcher.DedicatedServer.stripPlayers.remove(
-                playerName)
-        action = data['action']
+            self.launcher.DedicatedServer.stripPlayers.remove(playerName)
+        action = data["action"]
         if self.current_user == b"admin":
             if playerGUID:
                 if action == "kick":
-                    self.launcher.DedicatedServer.AstroRCON.DSKickPlayerGuid(
-                        playerGUID)
+                    self.launcher.DedicatedServer.AstroRCON.DSKickPlayerGuid(playerGUID)
                     AstroLogging.logPrint(f"Kicking player: {playerName}")
 
             if action == "ban":
                 if playerGUID:
-                    if len([x for x in players if x["playerName"] == playerName and x["inGame"]]) > 0:
-                        self.launcher.DedicatedServer.AstroRCON.DSKickPlayerGuid(
-                            playerGUID)
+                    if len(
+                        [x for x in players if x["playerName"] == playerName and x["inGame"]]
+                    ) > 0:
+                        self.launcher.DedicatedServer.AstroRCON.DSKickPlayerGuid(playerGUID)
                 if playerName:
                     self.launcher.DedicatedServer.AstroRCON.DSSetPlayerCategoryForPlayerName(
-                        playerName, "Blacklisted")
+                        playerName, "Blacklisted"
+                    )
                     self.launcher.DedicatedServer.refresh_settings()
                     AstroLogging.logPrint(f"Banning player: {playerName}")
 
             if action == "WL":
                 if playerName:
                     self.launcher.DedicatedServer.AstroRCON.DSSetPlayerCategoryForPlayerName(
-                        playerName, "Whitelisted")
+                        playerName, "Whitelisted"
+                    )
                     self.launcher.DedicatedServer.refresh_settings()
                     AstroLogging.logPrint(f"Whitelisting player: {playerName}")
 
             if action == "admin":
                 if playerName:
                     self.launcher.DedicatedServer.AstroRCON.DSSetPlayerCategoryForPlayerName(
-                        playerName, "Admin")
+                        playerName, "Admin"
+                    )
                     self.launcher.DedicatedServer.refresh_settings()
-                    AstroLogging.logPrint(
-                        f"Setting player as Admin: {playerName}")
+                    AstroLogging.logPrint(f"Setting player as Admin: {playerName}")
 
             if action == "reset":
                 if playerName:
                     self.launcher.DedicatedServer.AstroRCON.DSSetPlayerCategoryForPlayerName(
-                        playerName, "Unlisted")
+                        playerName, "Unlisted"
+                    )
                     self.launcher.DedicatedServer.refresh_settings()
-                    AstroLogging.logPrint(
-                        f"Resetting perms for player: {playerName}")
+                    AstroLogging.logPrint(f"Resetting perms for player: {playerName}")
 
             if action == "remove":
                 self.launcher.DedicatedServer.AstroRCON.DSSetPlayerCategoryForPlayerName(
-                    playerName, "Unlisted")
-                pp = list(
-                    self.launcher.DedicatedServer.settings.PlayerProperties)
+                    playerName, "Unlisted"
+                )
+                pp = list(self.launcher.DedicatedServer.settings.PlayerProperties)
 
                 pp = [
-                    x for x in pp if not (((f'PlayerFirstJoinName="{playerName}"' in x
-                                            and 'PlayerRecentJoinName=""' in x) or
-                                           ('PlayerFirstJoinName=""' in x
-                                            and f'PlayerRecentJoinName="{playerName}"' in x))
-                                          or f'PlayerGuid="{playerGUID}"' in x)]
+                    x
+                    for x in pp
+                    if not (
+                        (
+                            (
+                                f'PlayerFirstJoinName="{playerName}"' in x
+                                and 'PlayerRecentJoinName=""' in x
+                            )
+                            or (
+                                'PlayerFirstJoinName=""' in x
+                                and f'PlayerRecentJoinName="{playerName}"' in x
+                            )
+                        )
+                        or f'PlayerGuid="{playerGUID}"' in x
+                    )
+                ]
 
-                confPath = ntpath.join(
-                    self.launcher.astroPath, r"Astro\Saved\Config\WindowsServer\AstroServerSettings.ini")
+                confPath = os.path.join(
+                    self.launcher.astroPath,
+                    r"Astro\Saved\Config\WindowsServer\AstroServerSettings.ini",
+                )
 
-                ovrConfig = {
-                    "/Script/Astro.AstroServerSettings": {
-                        "PlayerProperties": pp
-                    }
-                }
+                ovrConfig = {"/Script/Astro.AstroServerSettings": {"PlayerProperties": pp}}
                 MultiConfig().overwrite_with(confPath, ovrConfig)
                 self.launcher.DedicatedServer.stripPlayers.append(playerName)
-                self.launcher.DedicatedServer.players['playerInfo'] = [
-                    x for x in self.launcher.DedicatedServer.players['playerInfo']
-                    if x['playerName'] not in self.launcher.DedicatedServer.stripPlayers]
+                self.launcher.DedicatedServer.players["playerInfo"] = [
+                    x
+                    for x in self.launcher.DedicatedServer.players["playerInfo"]
+                    if x["playerName"] not in self.launcher.DedicatedServer.stripPlayers
+                ]
                 self.launcher.DedicatedServer.refresh_settings()
-                AstroLogging.logPrint(
-                    f"Removing player data: {playerName}")
+                AstroLogging.logPrint(f"Removing player data: {playerName}")
 
             playerList = self.launcher.DedicatedServer.AstroRCON.DSListPlayers()
             if playerList is not None:

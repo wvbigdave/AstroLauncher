@@ -1,34 +1,48 @@
+"""Daemon process that watches the launcher + dedicated server and tears them
+down together when either exits."""
+
 import os
-import signal
 import subprocess
 import sys
 import time
 
 import psutil
 
+from cogs.cross_platform import ctrl_c_signal, get_detached_flags
 
-class AstroDaemon():
-    """
-        Daemon process to watch the Launcher and Dedicated Server
-    """
+
+class AstroDaemon:
+    """Watches the launcher (and the console that spawned it)."""
 
     @staticmethod
     def launch(executable, consolePID):
         if executable:
-            daemonCMD = [sys.executable, '--daemon', '-l',
-                         str(os.getpid()), '-c', str(consolePID)]
+            daemonCMD = [
+                sys.executable,
+                "--daemon",
+                "-l",
+                str(os.getpid()),
+                "-c",
+                str(consolePID),
+            ]
         else:
-            daemonCMD = [sys.executable, sys.argv[0], '--daemon',
-                         '-l', str(os.getpid()), '-c', str(consolePID)]
-        return subprocess.Popen(daemonCMD, shell=False, creationflags=subprocess.DETACHED_PROCESS |
-                                subprocess.CREATE_NEW_PROCESS_GROUP)
+            daemonCMD = [
+                sys.executable,
+                sys.argv[0],
+                "--daemon",
+                "-l",
+                str(os.getpid()),
+                "-c",
+                str(consolePID),
+            ]
+        return subprocess.Popen(daemonCMD, shell=False, creationflags=get_detached_flags())
 
     @staticmethod
-    def daemon(laucherPID, consolePID):
-        while(psutil.pid_exists(int(laucherPID)) and psutil.pid_exists(int(consolePID))):
+    def daemon(launcherPID, consolePID):
+        while psutil.pid_exists(int(launcherPID)) and psutil.pid_exists(int(consolePID)):
             time.sleep(0.5)
         try:
             for child in psutil.Process(int(consolePID)).children():
-                os.kill(child.pid, signal.CTRL_C_EVENT)
-        except KeyboardInterrupt as e:
-            print(e)
+                os.kill(child.pid, ctrl_c_signal())
+        except KeyboardInterrupt as exc:
+            print(exc)

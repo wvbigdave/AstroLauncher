@@ -1,10 +1,11 @@
+"""Dedicated-server process manager: launch, RCON control, savegame handling,
+player tracking, heartbeat/registration, and the status loop."""
 
 import dataclasses
 import datetime
 import glob
 import json
 import math
-import ntpath
 import os
 import subprocess
 import time
@@ -19,12 +20,11 @@ from cogs.AstroLogging import AstroLogging
 from cogs.AstroRCON import AstroRCON
 
 
-class AstroDedicatedServer():
-    """
-        The Dedicated Server Class.
-    """
+class AstroDedicatedServer:
+    """The Dedicated Server Class."""
+
     @dataclasses.dataclass
-    class ServerSettings():
+    class ServerSettings:
         PublicIP: str = None
         Port: str = None
         ServerName: str = None
@@ -68,7 +68,7 @@ class AstroDedicatedServer():
         self.lastHeartbeat = None
         self.LobbyID = None
         self.lastXAuth = datetime.datetime.now()
-        self.serverGUID = self.settings.ServerGuid if self.settings.ServerGuid != '' else "REGISTER"
+        self.serverGUID = self.settings.ServerGuid if self.settings.ServerGuid != "" else "REGISTER"
         if self.launcher.launcherConfig.EnableAutoRestart:
             self.syncRestartTime = self.launcher.launcherConfig.AutoRestartSyncTimestamp
             self.nextRestartTime = None
@@ -78,27 +78,32 @@ class AstroDedicatedServer():
                 if self.syncRestartTime == "midnight":
                     self.syncRestartTime = "00:00"
                 dt = datetime.datetime.today()
-                timestamp = datetime.datetime.strptime(
-                    self.syncRestartTime, '%H:%M')
-                restartTime = datetime.datetime.combine(dt, datetime.datetime.min.time())+datetime.timedelta(
-                    hours=timestamp.hour, minutes=timestamp.minute)
+                timestamp = datetime.datetime.strptime(self.syncRestartTime, "%H:%M")
+                restartTime = (
+                    datetime.datetime.combine(dt, datetime.datetime.min.time())
+                    + datetime.timedelta(hours=timestamp.hour, minutes=timestamp.minute)
+                )
                 RestartCooldown = bool(
-                    (dt - restartTime).total_seconds() < 300 and (dt - restartTime).total_seconds() > -300)
-                if timestamp.hour == 0 and ((dt - restartTime).total_seconds()/60/60) > self.launcher.launcherConfig.AutoRestartEveryHours:
+                    (dt - restartTime).total_seconds() < 300
+                    and (dt - restartTime).total_seconds() > -300
+                )
+                if timestamp.hour == 0 and (
+                    (dt - restartTime).total_seconds() / 60 / 60
+                ) > self.launcher.launcherConfig.AutoRestartEveryHours:
                     restartTime += datetime.timedelta(days=1)
                 if dt > restartTime or RestartCooldown:
-                    restartTime += \
-                        datetime.timedelta(
-                            hours=self.launcher.launcherConfig.AutoRestartEveryHours)
+                    restartTime += datetime.timedelta(
+                        hours=self.launcher.launcherConfig.AutoRestartEveryHours
+                    )
                     while dt >= restartTime:
-                        restartTime += \
-                            datetime.timedelta(
-                                hours=self.launcher.launcherConfig.AutoRestartEveryHours)
+                        restartTime += datetime.timedelta(
+                            hours=self.launcher.launcherConfig.AutoRestartEveryHours
+                        )
                 self.nextRestartTime = restartTime
             else:
-                self.nextRestartTime = self.lastRestart + \
-                    datetime.timedelta(
-                        hours=self.launcher.launcherConfig.AutoRestartEveryHours)
+                self.nextRestartTime = self.lastRestart + datetime.timedelta(
+                    hours=self.launcher.launcherConfig.AutoRestartEveryHours
+                )
         self.status = "off"
         self.DSListGames = ""
         self.busy = False
@@ -113,14 +118,21 @@ class AstroDedicatedServer():
 
     def refresh_settings(self, ovrIP=False):
         self.settings = dataclasses.replace(
-            self.settings, **ValidateSettings.get_current_settings(self.launcher, ovrIP=ovrIP))
-        self.ipPortCombo = f'{self.settings.PublicIP}:{self.settings.Port}'
+            self.settings,
+            **ValidateSettings.get_current_settings(self.launcher, ovrIP=ovrIP),
+        )
+        self.ipPortCombo = f"{self.settings.PublicIP}:{self.settings.Port}"
+
+    def _server_executable(self):
+        # AstroServer.exe is Windows-only. On Linux a wine/container wrapper
+        # should expose the same relative path so configs stay identical.
+        return os.path.join(self.astroPath, "AstroServer.exe")
 
     def start(self):
         if self.launcher.launcherConfig.HideServerConsoleWindow:
-            cmd = [ntpath.join(self.astroPath, "AstroServer.exe")]
+            cmd = [self._server_executable()]
         else:
-            cmd = [ntpath.join(self.astroPath, "AstroServer.exe"), '-log']
+            cmd = [self._server_executable(), "-log"]
         self.process = subprocess.Popen(cmd)
 
     @staticmethod
@@ -135,45 +147,36 @@ class AstroDedicatedServer():
 
     def getPaks(self):
         try:
-            pakPath = ntpath.join(self.astroPath, r"Astro\Saved\Paks")
+            pakPath = os.path.join(self.astroPath, r"Astro\Saved\Paks")
             for f in os.listdir(pakPath):
                 try:
-                    with open(ntpath.join(pakPath, f), "rb") as pakFile:
+                    with open(os.path.join(pakPath, f), "rb") as pakFile:
                         PP = PakParser(pakFile)
                         mdFile = "metadata.json"
                         md = PP.List(mdFile)
                         if mdFile in md:
                             ppData = PP.Unpack(mdFile).Data.decode()
-                            self.pakList.append({ntpath.basename(f): ppData})
-                except:
+                            self.pakList.append({os.path.basename(f): ppData})
+                except Exception:  # noqa: BLE001
                     pass
-        except:
+        except Exception:  # noqa: BLE001
             pass
 
     def get_save_file_name(self, save):
         saveGamePath = r"Astro\Saved\SaveGames"
-        saveGamePath = ntpath.join(
-            self.astroPath, saveGamePath)
+        saveGamePath = os.path.join(self.astroPath, saveGamePath)
         fullName = None
 
-        if save['bHasBeenFlaggedAsCreativeModeSave']:
-            c = "c"
-        else:
-            c = ""
-        if save['date']:
-            date = save['date']
-        else:
-            date = ""
-        saveFileName = (
-            glob.glob(saveGamePath + f"/{save['name']}${c}{date}.savegame"))
+        c = "c" if save["bHasBeenFlaggedAsCreativeModeSave"] else ""
+        date = save["date"] if save["date"] else ""
+        saveFileName = glob.glob(saveGamePath + f"/{save['name']}${c}{date}.savegame")
         if len(saveFileName) > 0:
             fullName = saveFileName[0]
         else:
-            saveFileName = (
-                glob.glob(saveGamePath + f"/{save['name']}.savegame"))
+            saveFileName = glob.glob(saveGamePath + f"/{save['name']}.savegame")
             if len(saveFileName) > 0:
                 fullName = saveFileName[0]
-        saveFileName = ntpath.basename(fullName)
+        saveFileName = os.path.basename(fullName)
         return fullName, saveFileName
 
     def getSaves(self):
@@ -181,7 +184,7 @@ class AstroDedicatedServer():
             if self.AstroRCON is None or not self.AstroRCON.connected:
                 return False
             tempSaveGames = {}
-            while tempSaveGames == {} and 'activeSaveName' not in tempSaveGames:
+            while tempSaveGames == {} and "activeSaveName" not in tempSaveGames:
                 tempSaveGames = self.AstroRCON.DSListGames()
                 time.sleep(0.1)
             self.DSListGames = tempSaveGames
@@ -190,28 +193,31 @@ class AstroDedicatedServer():
                     try:
                         sfPath, saveFileName = self.get_save_file_name(save)
                         if saveFileName:
-                            save['fileName'] = saveFileName
-                        size = AstroDedicatedServer.convert_size(
-                            ntpath.getsize(sfPath))
+                            save["fileName"] = saveFileName
+                        size = AstroDedicatedServer.convert_size(os.path.getsize(sfPath))
                         save["size"] = size
-                    except:
+                    except Exception:  # noqa: BLE001
                         pass
                     multipleOfName = False
                     hasDate = False
-                    if len([x for x in self.DSListGames["gameList"] if x['name'] == save['name']]) > 1:
+                    if (
+                        len([x for x in self.DSListGames["gameList"] if x["name"] == save["name"]])
+                        > 1
+                    ):
                         multipleOfName = True
-                        hasDate = save['date'] != ""
+                        hasDate = save["date"] != ""
 
-                    save['loadable'] = (
-                        (multipleOfName and hasDate) or not multipleOfName)
+                    save["loadable"] = (multipleOfName and hasDate) or not multipleOfName
 
-                    if save['name'] == self.DSListGames['activeSaveName'] and ((multipleOfName and hasDate) or not multipleOfName):
-                        save['active'] = "Active"
+                    if save["name"] == self.DSListGames["activeSaveName"] and (
+                        (multipleOfName and hasDate) or not multipleOfName
+                    ):
+                        save["active"] = "Active"
                     else:
-                        save['active'] = ""
-                except:
+                        save["active"] = ""
+                except Exception:  # noqa: BLE001
                     pass
-        except:
+        except Exception:  # noqa: BLE001
             pass
 
     def saveGame(self, name=None, shutdown=False):
@@ -231,7 +237,6 @@ class AstroDedicatedServer():
             return False
         self.setStatus("newsave")
         self.busy = "NewSave"
-        # time.sleep(1)
         AstroLogging.logPrint("Starting a new savegame...")
         self.AstroRCON.DSNewGame()
         self.AstroRCON.DSSaveGame()
@@ -243,9 +248,8 @@ class AstroDedicatedServer():
             return False
         self.setStatus("loadsave")
         self.busy = "LoadSave"
-        name = saveData['name']
+        name = saveData["name"]
         if pathvalidate.is_valid_filename(name):
-            # time.sleep(1)
             AstroLogging.logPrint(f"Loading save: {name}")
             self.AstroRCON.DSLoadGame(name)
         self.getSaves()
@@ -254,15 +258,14 @@ class AstroDedicatedServer():
     def deleteSaveGame(self, saveData):
         if self.AstroRCON is None or not self.AstroRCON.connected:
             return False
-        name = saveData['name']
+        name = saveData["name"]
         if pathvalidate.is_valid_filename(name):
             self.setStatus("delsave")
             self.busy = "DelSave"
             saveGamePath = r"Astro\Saved\SaveGames"
             AstroLogging.logPrint(f"Deleting save: {saveData['fileName']}")
-            sfPath = ntpath.join(
-                self.astroPath, saveGamePath, saveData['fileName'])
-            if ntpath.exists(sfPath):
+            sfPath = os.path.join(self.astroPath, saveGamePath, saveData["fileName"])
+            if os.path.exists(sfPath):
                 os.remove(sfPath)
         self.getSaves()
         self.busy = False
@@ -272,30 +275,28 @@ class AstroDedicatedServer():
             return False
         self.setStatus("renamesave")
         self.busy = "RenameSave"
-        if pathvalidate.is_valid_filename(oldSave['name']) and pathvalidate.is_valid_filename(newName):
+        if pathvalidate.is_valid_filename(oldSave["name"]) and pathvalidate.is_valid_filename(
+            newName
+        ):
             saveGamePath = r"Astro\Saved\SaveGames"
-            saveGamePath = ntpath.join(self.astroPath, saveGamePath)
-            AstroLogging.logPrint(
-                f"Renaming save: {oldSave['name']} to {newName}")
-            if oldSave['active']:
+            saveGamePath = os.path.join(self.astroPath, saveGamePath)
+            AstroLogging.logPrint(f"Renaming save: {oldSave['name']} to {newName}")
+            if oldSave["active"]:
                 self.saveGame(newName)
-                sfPath = ntpath.join(saveGamePath, oldSave['fileName'])
+                sfPath = os.path.join(saveGamePath, oldSave["fileName"])
                 self.getSaves()
-                newSave = [x for x in self.DSListGames['gameList']
-                           if x['name'] == newName]
+                newSave = [x for x in self.DSListGames["gameList"] if x["name"] == newName]
                 if newSave:
                     newSave = newSave[0]
-                    sfNPath = ntpath.join(saveGamePath, newSave['fileName'])
-                    if ntpath.exists(sfNPath) and ntpath.exists(sfPath):
+                    sfNPath = os.path.join(saveGamePath, newSave["fileName"])
+                    if os.path.exists(sfNPath) and os.path.exists(sfPath):
                         os.remove(sfPath)
             else:
-                saveFileName = oldSave['fileName']
-                sfPath = ntpath.join(saveGamePath, saveFileName)
-                newSaveFileName = saveFileName.replace(
-                    oldSave['name'], newName)
-                sfNPath = ntpath.join(saveGamePath, newSaveFileName)
-                # time.sleep(1)
-                if ntpath.exists(sfPath) and not ntpath.exists(sfNPath):
+                saveFileName = oldSave["fileName"]
+                sfPath = os.path.join(saveGamePath, saveFileName)
+                newSaveFileName = saveFileName.replace(oldSave["name"], newName)
+                sfNPath = os.path.join(saveGamePath, newSaveFileName)
+                if os.path.exists(sfPath) and not os.path.exists(sfNPath):
                     os.rename(sfPath, sfNPath)
 
         self.getSaves()
@@ -306,7 +307,6 @@ class AstroDedicatedServer():
             return False
         self.setStatus("shutdown")
         self.busy = "Shutdown"
-        # time.sleep(1)
         self.AstroRCON.DSServerShutdown()
         self.DSServerStats = None
         AstroLogging.logPrint("Server shutdown.", ovrDWHL=True)
@@ -321,12 +321,12 @@ class AstroDedicatedServer():
     def setStatus(self, status):
         try:
             self.status = status
-        except:
+        except Exception:  # noqa: BLE001
             pass
 
     def quickToggleWhitelist(self):
-        '''Toggling the whitelist is good for forcing the server to put every player who has joined the current save's Guid into the INI'''
-
+        """Toggling DenyUnlisted forces the server to write every known player's
+        Guid into the INI."""
         if self.AstroRCON is None or not self.AstroRCON.connected:
             return False
         wLOn = self.settings.DenyUnlistedPlayers
@@ -335,24 +335,23 @@ class AstroDedicatedServer():
         self.refresh_settings()
 
     def getXauth(self):
-        if self.lastXAuth is None or (datetime.datetime.now() - self.lastXAuth).total_seconds() > 3600:
+        if self.lastXAuth is None or (
+            datetime.datetime.now() - self.lastXAuth
+        ).total_seconds() > 3600:
             try:
                 gxAuth = None
                 while gxAuth is None:
                     try:
-                        AstroLogging.logPrint(
-                            "Generating new xAuth...", "debug")
-                        gxAuth = AstroAPI.generate_XAUTH(
-                            self.settings.ServerGuid)
-                    except:
+                        AstroLogging.logPrint("Generating new xAuth...", "debug")
+                        gxAuth = AstroAPI.generate_XAUTH(self.settings.ServerGuid)
+                    except Exception:  # noqa: BLE001
                         time.sleep(10)
-                self.launcher.headers['X-Authorization'] = gxAuth
+                self.launcher.headers["X-Authorization"] = gxAuth
                 self.lastXAuth = datetime.datetime.now()
-            except:
+            except Exception:  # noqa: BLE001
                 self.lastXAuth += datetime.timedelta(seconds=20)
 
     def server_loop(self):
-        # AstroLogging.logPrint("Starting server_loop: 2", "debug")
         while True:
             # Ensure RCON is connected
             try:
@@ -360,215 +359,223 @@ class AstroDedicatedServer():
                     AstroLogging.logPrint("Starting RCON connection...", "debug")
                     self.AstroRCON = self.start_RCON()
                     self.quickToggleWhitelist()
-            except:
+            except Exception:  # noqa: BLE001
                 pass
             while not self.AstroRCON.connected:
-                # AstroLogging.logPrint("Waiting on AstroRCON to connect", "debug")
                 time.sleep(0.1)
-            ###########################
 
-            # AstroLogging.logPrint("Running through another loop...", "debug")
             now = datetime.datetime.now()
 
             if not self.launcher.launcherConfig.DisableBackupRetention:
                 self.launcher.backup_retention()
 
-            # AstroLogging.logPrint("Server_loop section: 1", "debug")
             self.launcher.save_reporting()
 
-            # AstroLogging.logPrint("Server_loop section: 2", "debug")
             if self.launcher.launcherConfig.EnableAutoRestart:
-                if (((now - self.lastRestart).total_seconds() > 60) and ((self.nextRestartTime - now).total_seconds() < 0)):
-                    AstroLogging.logPrint(
-                        "Preparing to shutdown the server.")
+                if (
+                    (now - self.lastRestart).total_seconds() > 60
+                    and (self.nextRestartTime - now).total_seconds() < 0
+                ):
+                    AstroLogging.logPrint("Preparing to shutdown the server.")
                     self.lastRestart = now
                     self.nextRestartTime += datetime.timedelta(
-                        hours=self.launcher.launcherConfig.AutoRestartEveryHours)
+                        hours=self.launcher.launcherConfig.AutoRestartEveryHours
+                    )
                     self.save_and_shutdown()
 
-            # AstroLogging.logPrint("Server_loop section: 3", "debug")
             if self.process.poll() is not None:
-                AstroLogging.logPrint(
-                    "Server was closed. Restarting..")
+                AstroLogging.logPrint("Server was closed. Restarting..")
                 return self.launcher.start_server()
 
-            # AstroLogging.logPrint("Server_loop section: 4", "debug")
             self.getXauth()
 
-            # AstroLogging.logPrint("Server_loop section: 5", "debug")
-            # AstroLogging.logPrint(f"self.lastHeartbeat: {self.lastHeartbeat}", "debug")
-            # try:
-            #     AstroLogging.logPrint(f"total_seconds: {(now - self.lastHeartbeat).total_seconds()}", "debug")
-            # except:
-            #     pass
             if self.lastHeartbeat is None or (now - self.lastHeartbeat).total_seconds() > 30:
-
                 try:
                     needs_update, latest_version = self.launcher.check_for_server_update(
-                        serverStart=True, check_only=True)
-
+                        serverStart=True, check_only=True
+                    )
                     if needs_update and self.launcher.launcherConfig.AutoUpdateServerSoftware:
                         self.save_and_shutdown()
-                        AstroLogging.logPrint("Told server to shut down, continuing with update...", msgType="debug")
+                        AstroLogging.logPrint(
+                            "Told server to shut down, continuing with update...",
+                            msgType="debug",
+                        )
                         self.launcher.update_server(latest_version)
                         continue
-                except:
+                except Exception:  # noqa: BLE001
                     pass
 
                 serverData = []
                 try:
-
-                    AstroLogging.logPrint(
-                        "Getting Server data for Heartbeat", "debug")
-                    serverData = (AstroAPI.get_server(
-                        self.ipPortCombo, self.launcher.headers))['data']['Games']
+                    AstroLogging.logPrint("Getting Server data for Heartbeat", "debug")
+                    serverData = AstroAPI.get_server(self.ipPortCombo, self.launcher.headers)[
+                        "data"
+                    ]["Games"]
                     if len(serverData) > 0:
                         self.serverData = serverData[0]
-                except:
+                except Exception:  # noqa: BLE001
                     pass
-                hbServerName = {"customdata": {
-                    "ServerName": self.settings.ServerName,
-                    "ServerType": ("AstroLauncherEXE" if self.launcher.isExecutable else "AstroLauncherPy") + f" {self.launcher.version}",
-                    "ServerPaks": self.pakList
-                }}
+                hbServerName = {
+                    "customdata": {
+                        "ServerName": self.settings.ServerName,
+                        "ServerType": (
+                            "AstroLauncherEXE" if self.launcher.isExecutable else "AstroLauncherPy"
+                        )
+                        + f" {self.launcher.version}",
+                        "ServerPaks": self.pakList,
+                    }
+                }
 
                 AstroLogging.logPrint("Attempting Heartbeat...", "debug")
                 hbStatus = AstroAPI.heartbeat_server(
-                    self.serverData, self.launcher.headers, {"serverName": json.dumps(hbServerName)})
+                    self.serverData,
+                    self.launcher.headers,
+                    {"serverName": json.dumps(hbServerName)},
+                )
 
                 hbTryCount = 1
-                while hbStatus['status'] != "OK":
+                while hbStatus["status"] != "OK":
                     hbrs = self.launcher.launcherConfig.HeartBeatFailRestartServer
                     if hbrs != 0 and hbTryCount > hbrs:
                         self.kill_server(
                             reason="Server was unable to heartbeat, restarting...",
-                            save=True, killLauncher=False)
+                            save=True,
+                            killLauncher=False,
+                        )
                         time.sleep(5)
                         return self.launcher.start_server()
                     if hbTryCount > 1:
-                        time.sleep(5*hbTryCount)
+                        time.sleep(5 * hbTryCount)
                     self.getXauth()
                     try:
                         hbStatus = AstroAPI.heartbeat_server(
-                            self.serverData, self.launcher.headers, {"serverName": json.dumps(hbServerName)})
+                            self.serverData,
+                            self.launcher.headers,
+                            {"serverName": json.dumps(hbServerName)},
+                        )
+                        AstroLogging.logPrint(f"hbStatus: {hbStatus}", "debug")
+                        if "status" in hbStatus and hbStatus["status"] == "Error":
+                            raise RuntimeError("HeartBeatError")
+                    except Exception:  # noqa: BLE001
                         AstroLogging.logPrint(
-                            f"hbStatus: {hbStatus}", "debug")
-                        if 'status' in hbStatus and hbStatus['status'] == "Error":
-                            raise "HeartBeatError"
-
-                    except:
-                        AstroLogging.logPrint(
-                            f"Failed to heartbeat server on attempt: {hbTryCount}", msgType="warning")
+                            f"Failed to heartbeat server on attempt: {hbTryCount}",
+                            msgType="warning",
+                        )
                     hbTryCount += 1
 
                 if hbTryCount > 1:
-                    AstroLogging.logPrint(
-                        "Connection reestablished! Successful heartbeat!")
+                    AstroLogging.logPrint("Connection reestablished! Successful heartbeat!")
 
                 self.lastHeartbeat = datetime.datetime.now()
 
-            # AstroLogging.logPrint("Server_loop section: 6", "debug")
             if self.launcher.webServer is not None:
                 self.setStatus("ready")
                 self.busy = "getSavesInLoop"
                 self.getSaves()
                 self.busy = False
 
-            # AstroLogging.logPrint("Server_loop section: 7", "debug")
             self.setStatus("ready")
             serverStats = self.AstroRCON.DSServerStatistics()
-            if serverStats is not None and 'averageFPS' in serverStats:
+            if serverStats is not None and "averageFPS" in serverStats:
                 self.DSServerStats = serverStats
                 if self.launcher.launcherConfig.ShowServerFPSInConsole:
-                    FPSJumpRate = (
-                        float(self.settings.MaxServerFramerate) / 5)
-                    if self.oldServerStats is None or (abs(float(self.DSServerStats['averageFPS']) - float(self.oldServerStats['averageFPS'])) > FPSJumpRate):
+                    FPSJumpRate = float(self.settings.MaxServerFramerate) / 5
+                    if self.oldServerStats is None or (
+                        abs(float(self.DSServerStats["averageFPS"]) - float(self.oldServerStats["averageFPS"]))
+                        > FPSJumpRate
+                    ):
                         AstroLogging.logPrint(
-                            f"Server FPS: {round(self.DSServerStats['averageFPS'])}")
+                            f"Server FPS: {round(self.DSServerStats['averageFPS'])}"
+                        )
                 self.oldServerStats = self.DSServerStats
 
-            # AstroLogging.logPrint("Server_loop section: 8", "debug")
             self.setStatus("ready")
             playerList = self.AstroRCON.DSListPlayers()
-            if playerList is not None and 'playerInfo' in playerList:
+            if playerList is not None and "playerInfo" in playerList:
                 self.players = playerList
-                curPlayers = [
-                    x for x in self.players['playerInfo'] if x['inGame']]
-                curPIDList = [x['playerGuid'] for x in curPlayers]
-                onlinePIDList = [x['playerGuid'] for x in self.onlinePlayers]
+                curPlayers = [x for x in self.players["playerInfo"] if x["inGame"]]
+                curPIDList = [x["playerGuid"] for x in curPlayers]
+                onlinePIDList = [x["playerGuid"] for x in self.onlinePlayers]
 
                 if len(curPlayers) > len(self.onlinePlayers):
                     playerDif = list(set(curPIDList) - set(onlinePIDList))
                     AstroLogging.logPrint(
-                        f"P. Joining - OnlinePlayers: {onlinePIDList}", "debug")
-                    AstroLogging.logPrint(
-                        f"P. Joining - CurPlayers: {curPIDList}", "debug")
-                    AstroLogging.logPrint(
-                        f"P. Joining - dif: {playerDif}", "debug")
+                        f"P. Joining - OnlinePlayers: {onlinePIDList}", "debug"
+                    )
+                    AstroLogging.logPrint(f"P. Joining - CurPlayers: {curPIDList}", "debug")
+                    AstroLogging.logPrint(f"P. Joining - dif: {playerDif}", "debug")
                     if len(playerDif) > 0:
                         playerDif = playerDif[0]
                         self.onlinePlayers = curPlayers
                         if playerDif in self.stripPlayers:
                             self.stripPlayers.remove(playerDif)
 
-                        difName = [x for x in self.players['playerInfo']
-                                   if x['playerGuid'] == playerDif][0]["playerName"]
+                        difName = [
+                            x for x in self.players["playerInfo"] if x["playerGuid"] == playerDif
+                        ][0]["playerName"]
 
                         AstroLogging.logPrint(
-                            f"Player joining: {difName}", ovrDWHL=True, dwet="j")
+                            f"Player joining: {difName}", ovrDWHL=True, dwet="j"
+                        )
 
                         # Add player to INI with Unlisted category if not exists or is Pending
                         pp = list(self.settings.PlayerProperties)
-                        if len([x for x in pp if playerDif in x and "PlayerCategory=Pending" not in x]) == 0:
-                            self.AstroRCON.DSSetPlayerCategoryForPlayerName(
-                                playerDif, "Unlisted")
+                        if (
+                            len([x for x in pp if playerDif in x and "PlayerCategory=Pending" not in x])
+                            == 0
+                        ):
+                            self.AstroRCON.DSSetPlayerCategoryForPlayerName(playerDif, "Unlisted")
                             self.refresh_settings()
 
                 elif len(curPlayers) < len(self.onlinePlayers):
                     playerDif = list(set(onlinePIDList) - set(curPIDList))
                     AstroLogging.logPrint(
-                        f"P. Leaving - OnlinePlayers: {onlinePIDList}", "debug")
-                    AstroLogging.logPrint(
-                        f"P. Leaving - CurPlayers: {curPIDList}", "debug")
-                    AstroLogging.logPrint(
-                        f"P. Leaving - dif: {playerDif}", "debug")
+                        f"P. Leaving - OnlinePlayers: {onlinePIDList}", "debug"
+                    )
+                    AstroLogging.logPrint(f"P. Leaving - CurPlayers: {curPIDList}", "debug")
+                    AstroLogging.logPrint(f"P. Leaving - dif: {playerDif}", "debug")
                     if len(playerDif) > 0:
                         playerDif = playerDif[0]
                         self.onlinePlayers = curPlayers
 
-                        difName = [x for x in self.players['playerInfo']
-                                   if x['playerGuid'] == playerDif][0]["playerName"]
+                        difName = [
+                            x for x in self.players["playerInfo"] if x["playerGuid"] == playerDif
+                        ][0]["playerName"]
                         AstroLogging.logPrint(
-                            f"Player left: {difName}", ovrDWHL=True, dwet="l")
+                            f"Player left: {difName}", ovrDWHL=True, dwet="l"
+                        )
 
-                self.players['playerInfo'] = [
-                    x for x in playerList['playerInfo'] if x['playerGuid'] not in self.stripPlayers]
+                self.players["playerInfo"] = [
+                    x
+                    for x in playerList["playerInfo"]
+                    if x["playerGuid"] not in self.stripPlayers
+                ]
 
-            # AstroLogging.logPrint("Server_loop section: 9", "debug")
-            time.sleep(
-                self.launcher.launcherConfig.ServerStatusFrequency)
+            time.sleep(self.launcher.launcherConfig.ServerStatusFrequency)
 
     def deregister_all_server(self):
-        servers_registered = (AstroAPI.get_server(
-            self.ipPortCombo, self.launcher.headers))['data']['Games']
+        servers_registered = AstroAPI.get_server(self.ipPortCombo, self.launcher.headers)[
+            "data"
+        ]["Games"]
 
         self.registered = False
-        if (len(servers_registered)) > 0:
+        if len(servers_registered) > 0:
             AstroLogging.logPrint(
-                f"Attemping to deregister all ({len(servers_registered)}) servers matching self")
-            # pprint(servers_registered)
+                f"Attemping to deregister all ({len(servers_registered)}) servers matching self"
+            )
             for counter, reg_srvr in enumerate(servers_registered):
-                # reg_srvr['LobbyID']
                 AstroLogging.logPrint(
-                    f"Deregistering {counter+1}/{len(servers_registered)}...")
-                drg_status = AstroAPI.deregister_server(
-                    reg_srvr['LobbyID'], self.launcher.headers)
-                if 'status' in drg_status and drg_status['status'] == "Error":
+                    f"Deregistering {counter + 1}/{len(servers_registered)}..."
+                )
+                drg_status = AstroAPI.deregister_server(reg_srvr["LobbyID"], self.launcher.headers)
+                if "status" in drg_status and drg_status["status"] == "Error":
                     AstroLogging.logPrint(
-                        "Trouble deregistering server. Multiple servers may still be registered.", msgType="warning")
+                        "Trouble deregistering server. Multiple servers may still be registered.",
+                        msgType="warning",
+                    )
             AstroLogging.logPrint("All servers deregistered")
             time.sleep(1)
-            return [x['LobbyID'] for x in servers_registered]
+            return [x["LobbyID"] for x in servers_registered]
         return []
 
     def kill_server(self, reason, save=False, killLauncher=True):
@@ -576,32 +583,32 @@ class AstroDedicatedServer():
         try:
             self.busy = "Kill"
             self.setStatus("shutdown")
-        except:
+        except Exception:  # noqa: BLE001
             pass
         try:
             if save:
                 self.AstroRCON.lock = False
                 self.shutdownServer()
                 time.sleep(1)
-        except:
+        except Exception:  # noqa: BLE001
             pass
         try:
             self.deregister_all_server()
-        except:
+        except Exception:  # noqa: BLE001
             pass
         # Kill all child processes
         try:
             for child in psutil.Process(self.process.pid).children():
                 child.kill()
-        except:
+        except Exception:  # noqa: BLE001
             pass
         try:
             self.setStatus("off")
-        except:
+        except Exception:  # noqa: BLE001
             pass
         # Kill current process
         try:
             if killLauncher:
                 os.kill(os.getpid(), 9)
-        except:
+        except Exception:  # noqa: BLE001
             pass

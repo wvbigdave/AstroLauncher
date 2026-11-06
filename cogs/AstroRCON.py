@@ -1,3 +1,9 @@
+"""Astroneer dedicated-server console (RCON) client.
+
+The dedicated server exposes a plain-text console over TCP on the configured
+ConsolePort; the first line sent is the console password, then commands are
+newline-terminated JSON-returning requests.
+"""
 
 import json
 import socket
@@ -7,8 +13,7 @@ from contextlib import contextmanager
 from cogs.AstroLogging import AstroLogging
 
 
-class AstroRCON():
-
+class AstroRCON:
     def __init__(self, DedicatedServer):
         self.DS = DedicatedServer
         self.connected = False
@@ -16,200 +21,140 @@ class AstroRCON():
         self.lock = False
 
     @contextmanager
-    def lockRcon(self):
+    def lockRcon(self):  # noqa: N802
+        # Simple spin-lock so only one RCON command is in flight at a time.
+        while self.lock:
+            time.sleep(0.01)
+        self.lock = True
         try:
-            while self.lock:
-                pass
-            self.lock = True
             yield self
-        except:
-            self.lock = False
         finally:
             self.lock = False
 
     def run(self):
-        # pylint: disable=protected-access
-        if self.socket is None or self.socket._closed:
+        if self.socket is None or self.socket.fileno() == -1:
             self.socket = self.getSocket()
         if not self.connected:
             try:
                 self.socket.send(b"u up?")
-            except:  # Exception as e:
+            except Exception:  # noqa: BLE001
                 self.connected = False
-                #print("no response, reconnecting..")
                 try:
                     self.connectSocket()
-                except:  # Exception as er:
+                except Exception:  # noqa: BLE001
                     pass
-                #print(f"3 {e}")
 
     def connectSocket(self):
         if not self.connected:
-            # print("Connecting...")
-            self.socket.connect(
-                ("127.0.0.1", int(self.DS.settings.ConsolePort)))
+            self.socket.connect(("127.0.0.1", int(self.DS.settings.ConsolePort)))
             with self.lockRcon() as s:
-                # Send console password
-                s.socket.sendall(
-                    f"{self.DS.settings.ConsolePassword}\n".encode())
-                # print(f"{self.DS.settings.ConsolePassword}\n".encode())
+                s.socket.sendall(f"{self.DS.settings.ConsolePassword}\n".encode())
             self.connected = True
             AstroLogging.logPrint("Connected to RCON Console!")
 
-    def getSocket(self):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        return s
+    @staticmethod
+    def getSocket():
+        return socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    def DSListPlayers(self):
+    def _command(self, text):
+        with self.lockRcon() as s:
+            s.socket.sendall(text.encode() if isinstance(text, str) else text)
+            rawdata = AstroRCON.recvall(s.socket)
+        return AstroRCON.parseData(rawdata)
+
+    def DSListPlayers(self):  # noqa: N802
         try:
-            with self.lockRcon() as s:
-                s.socket.sendall(b"DSListPlayers\n")
-                rawdata = AstroRCON.recvall(s.socket)
-                parsedData = AstroRCON.parseData(rawdata)
-                # pprint(parsedData)
-                return parsedData
-        except Exception as e:
-            print(f"Error retrieving player list: {e}")
+            return self._command("DSListPlayers\n")
+        except Exception as exc:  # noqa: BLE001
+            print(f"Error retrieving player list: {exc}")
             return None
 
-    def DSKickPlayerGuid(self, playerGuid):
+    def DSKickPlayerGuid(self, playerGuid):  # noqa: N802
         try:
-            with self.lockRcon() as s:
-                s.socket.sendall(
-                    f'DSKickPlayerGuid {playerGuid}\n'.encode())
-                rawdata = AstroRCON.recvall(s.socket)
-                parsedData = AstroRCON.parseData(rawdata)
-                # pprint(parsedData)
-                return parsedData
-        except Exception as e:
-            print(f"Error kicking player: {e}")
+            return self._command(f"DSKickPlayerGuid {playerGuid}\n")
+        except Exception as exc:  # noqa: BLE001
+            print(f"Error kicking player: {exc}")
             return None
 
-    def DSSetPlayerCategoryForPlayerName(self, playerName, category):
+    def DSSetPlayerCategoryForPlayerName(self, playerName, category):  # noqa: N802
         try:
             escapedName = playerName.replace('"', '\\"')
-            with self.lockRcon() as s:
-                s.socket.sendall(
-                    f'DSSetPlayerCategoryForPlayerName "{escapedName}" {category}\n'.encode())
-                rawdata = AstroRCON.recvall(s.socket)
-                parsedData = AstroRCON.parseData(rawdata)
-                # pprint(parsedData)
-                return parsedData
-        except:  # Exception as e:
-            # print(e)
+            return self._command(f'DSSetPlayerCategoryForPlayerName "{escapedName}" {category}\n')
+        except Exception:  # noqa: BLE001
             return None
 
-    def DSServerStatistics(self):
+    def DSServerStatistics(self):  # noqa: N802
         try:
-            with self.lockRcon() as s:
-                s.socket.sendall(b"DSServerStatistics\n")
-                rawdata = AstroRCON.recvall(s.socket)
-                parsedData = AstroRCON.parseData(rawdata)
-                # pprint(parsedData)
-                return parsedData
-        except Exception as e:
-            print(f"Error retrieving server statistics: {e}")
+            return self._command("DSServerStatistics\n")
+        except Exception as exc:  # noqa: BLE001
+            print(f"Error retrieving server statistics: {exc}")
             return None
 
-    def DSSaveGame(self, name=None):
+    def DSSaveGame(self, name=None):  # noqa: N802
         try:
             with self.lockRcon() as s:
-                if name is not None:
-                    s.socket.sendall(f"DSSaveGame {name}\n".encode())
-                else:
-                    s.socket.sendall(b"DSSaveGame\n")
-                #rawdata = AstroRCON.recvall(s.socket)
-                #parsedData = AstroRCON.parseData(rawdata)
-                # pprint(parsedData)
-                
+                s.socket.sendall(f"DSSaveGame {name}\n".encode() if name is not None else b"DSSaveGame\n")
+                # The dedicated server takes a moment to write the save; wait
+                # before issuing further commands.
                 time.sleep(1.1)
-                return  # parsedData
-        except:  # Exception as e:
-            # print(e)
+            return None
+        except Exception:  # noqa: BLE001
             return None
 
-    def DSSetDenyUnlisted(self, state):
+    def DSSetDenyUnlisted(self, state):  # noqa: N802
         try:
-            with self.lockRcon() as s:
-                s.socket.sendall(
-                    f'DSSetDenyUnlisted {state}\n'.encode())
-                rawdata = AstroRCON.recvall(s.socket)
-                parsedData = AstroRCON.parseData(rawdata)
-                # pprint(parsedData)
-                return parsedData
-        except:  # Exception as e:
-            # print(e)
+            return self._command(f"DSSetDenyUnlisted {state}\n")
+        except Exception:  # noqa: BLE001
             return None
 
-    def DSServerShutdown(self):
+    def DSServerShutdown(self):  # noqa: N802
         try:
             self.socket.sendall(b"DSServerShutdown\n")
-            #rawdata = AstroRCON.recvall(self.socket)
-            #parsedData = AstroRCON.parseData(rawdata)
-            # pprint(parsedData)
-            return  # parsedData
-        except:  # Exception as e:
-            # print(e)
+            return None
+        except Exception:  # noqa: BLE001
             return None
 
-    def DSListGames(self):
+    def DSListGames(self):  # noqa: N802
         try:
-            with self.lockRcon() as s:
-                s.socket.sendall(b"DSListGames\n")
-                rawdata = AstroRCON.recvall(s.socket)
-                parsedData = AstroRCON.parseData(rawdata)
-                # pprint(parsedData)
-                return parsedData
-        except Exception as e:
-            print(f"Error retrieving savegame list: {e}")
+            return self._command("DSListGames\n")
+        except Exception as exc:  # noqa: BLE001
+            print(f"Error retrieving savegame list: {exc}")
             return None
 
-    def DSNewGame(self):
+    def DSNewGame(self):  # noqa: N802
         try:
             with self.lockRcon() as s:
                 s.socket.sendall(b"DSNewGame\n")
-            # pprint(parsedData)
             return True
-        except:  # Exception as e:
-            # print(e)
+        except Exception:  # noqa: BLE001
             return None
 
-    def DSLoadGame(self, name):
+    def DSLoadGame(self, name):  # noqa: N802
         try:
-            with self.lockRcon() as s:
-                s.socket.sendall(f'DSLoadGame {name}\n'.encode())
-                rawdata = AstroRCON.recvall(s.socket)
-                parsedData = AstroRCON.parseData(rawdata)
-                # pprint(parsedData)
-                return parsedData
-        except:  # Exception as e:
-            # print(e)
+            return self._command(f"DSLoadGame {name}\n")
+        except Exception:  # noqa: BLE001
             return None
 
     @staticmethod
     def recvall(sock):
         try:
             BUFF_SIZE = 4096  # 4 KiB
-            data = b''
+            data = b""
             while True:
                 part = sock.recv(BUFF_SIZE)
                 data += part
                 if len(part) < BUFF_SIZE:
-                    # either 0 or end of data
                     break
             return data
-        except:  # ConnectionResetError as e:
-            #print(f"recvall Error {e}")
+        except Exception:  # noqa: BLE001
             return None
 
     @staticmethod
-    def parseData(rawdata):
+    def parseData(rawdata):  # noqa: N802
         try:
             if rawdata != b"":
                 rawdata = rawdata.rstrip()
-                data = json.loads(rawdata.decode())
-                return data
+                return json.loads(rawdata.decode())
             return None
-        except:  # Exception as e:
-            #print(f"RCON Parse Error {e}")
+        except Exception:  # noqa: BLE001
             return rawdata
