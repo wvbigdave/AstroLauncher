@@ -95,6 +95,32 @@ def terminate_tree(process, kill: bool = True) -> None:
         pass
 
 
+def validate_server_path(raw_path):
+    """Canonicalize and validate a user-supplied server directory.
+
+    Resolves the path to an absolute real path, rejects anything that is not a
+    directory, and returns the normalized form so downstream file operations
+    never act on an ambiguous or relative path.
+    """
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError("server path must be a non-empty string")
+    resolved = os.path.realpath(os.path.expanduser(raw_path))
+    if not os.path.isdir(resolved):
+        raise ValueError(f"server path is not a directory: {resolved}")
+    return resolved
+
+
+def validate_ini_path(raw_path):
+    """Canonicalize a launcher INI path, requiring an absolute location."""
+    if not isinstance(raw_path, str) or not raw_path.strip():
+        raise ValueError("ini path must be a non-empty string")
+    resolved = os.path.realpath(os.path.expanduser(raw_path))
+    parent = os.path.dirname(resolved)
+    if parent and not os.path.isdir(parent):
+        raise ValueError(f"ini directory does not exist: {parent}")
+    return resolved
+
+
 # ---------------------------------------------------------------------------
 # Firewall (Windows netsh only; no-op elsewhere)
 # ---------------------------------------------------------------------------
@@ -103,47 +129,58 @@ def configure_firewall(launcher) -> None:
     """Add/refresh Windows firewall rules for the server, launcher and web UI.
 
     No-op on non-Windows, and when automatic firewall config is disabled.
+    All netsh invocations use an argv list with ``shell=False`` so no
+    interpreter ever parses a path or port as shell syntax.
     """
     if not IS_WINDOWS:
         return
     if not launcher.launcherConfig.AdminAutoConfigureFirewall:
         return
 
-    ALRule = None
-    ALWRule = None
-    ASRule = None
-    launcherEXEPath = None
+    def netsh(*args: str) -> str:
+        result = subprocess.run(
+            ["netsh", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            shell=False,
+        )
+        return (result.stdout or "") + (result.stderr or "")
 
-    with os.popen(
-        'netsh advfirewall show currentprofile | findstr /L "State" | findstr /L "ON"'
-    ) as fwCheck:
-        isFirewallEnabled = fwCheck.read()
-
-    if not isFirewallEnabled:
+    if "ON" not in netsh("advfirewall", "show", "currentprofile").upper():
         return
 
     serverExePath = os.path.join(
         launcher.astroPath, "astro", "binaries", "win64", "astroserver-win64-shipping.exe"
     )
-    ASRule = os.popen(
-        f'netsh advfirewall firewall show rule name=astroserver-win64-shipping.exe verbose | findstr /L "{serverExePath}"'
-    ).read()
+    ASRule = serverExePath.lower() in netsh(
+        "advfirewall", "firewall", "show", "rule",
+        "name=astroserver-win64-shipping.exe", "verbose",
+    ).lower()
 
+    ALRule = True
+    launcherEXEPath = None
     if launcher.isExecutable:
-        launcherEXEPath = os.path.join(os.getcwd(), sys.argv[0])
-        ALRule = os.popen(
-            f'netsh advfirewall firewall show rule name=astrolauncher.exe verbose | findstr /L "{launcherEXEPath}"'
-        ).read()
-        if not launcher.launcherConfig.DisableWebServer:
-            ALWRule = os.popen(
-                f'netsh advfirewall firewall show rule name=AstroLauncherWeb | findstr /L "{launcher.launcherConfig.WebServerPort}"'
-            ).read()
+        launcherEXEPath = os.path.normpath(os.path.join(os.getcwd(), sys.argv[0]))
+        ALRule = launcherEXEPath.lower() in netsh(
+            "advfirewall", "firewall", "show", "rule",
+            "name=astrolauncher.exe", "verbose",
+        ).lower()
+
+    webPort = None
+    ALWRule = True
+    if launcher.isExecutable and not launcher.launcherConfig.DisableWebServer:
+        webPort = int(launcher.launcherConfig.WebServerPort)
+        ALWRule = str(webPort) in netsh(
+            "advfirewall", "firewall", "show", "rule",
+            "name=AstroLauncherWeb", "verbose",
+        )
 
     if not is_admin():
-        missing = (not ASRule)
+        missing = not ASRule
         if launcher.isExecutable and not ALRule:
             missing = True
-        if not launcher.launcherConfig.DisableWebServer and launcher.isExecutable and not ALWRule:
+        if webPort is not None and not ALWRule:
             missing = True
         if missing:
             from cogs.AstroLogging import AstroLogging  # noqa: PLC0415
@@ -155,33 +192,28 @@ def configure_firewall(launcher) -> None:
 
     from cogs.AstroLogging import AstroLogging  # noqa: PLC0415
 
+    def ensure_rule(name: str, *rule_args: str) -> None:
+        netsh("advfirewall", "firewall", "delete", "rule", f"name={name}")
+        netsh("advfirewall", "firewall", "add", "rule", f"name={name}", *rule_args)
+
     newRules = False
     if not ASRule:
         newRules = True
-        subprocess.call(
-            f'netsh advfirewall firewall delete rule name=astroserver-win64-shipping.exe dir=in program="{serverExePath}"'
-            + f'& netsh advfirewall firewall add rule name=astroserver-win64-shipping.exe dir=in action=allow program="{serverExePath}"',
-            shell=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        ensure_rule(
+            "astroserver-win64-shipping.exe",
+            "dir=in", "action=allow", f"program={serverExePath}",
         )
     if launcher.isExecutable and not ALRule:
         newRules = True
-        subprocess.call(
-            f'netsh advfirewall firewall delete rule name=astrolauncher.exe dir=in program="{launcherEXEPath}"'
-            + f'& netsh advfirewall firewall add rule name=astrolauncher.exe dir=in action=allow program="{launcherEXEPath}"',
-            shell=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        ensure_rule(
+            "astrolauncher.exe",
+            "dir=in", "action=allow", f"program={launcherEXEPath}",
         )
-    if not launcher.launcherConfig.DisableWebServer and not ALWRule:
+    if webPort is not None and not ALWRule:
         newRules = True
-        subprocess.call(
-            f'netsh advfirewall firewall delete rule name=AstroLauncherWeb dir=in protocol=TCP localport={launcher.launcherConfig.WebServerPort}'
-            + f'& netsh advfirewall firewall add rule name=AstroLauncherWeb dir=in action=allow protocol=TCP localport={launcher.launcherConfig.WebServerPort}',
-            shell=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+        ensure_rule(
+            "AstroLauncherWeb",
+            "dir=in", "action=allow", "protocol=TCP", f"localport={webPort}",
         )
     if newRules:
         AstroLogging.logPrint("Setting custom firewall rules...")

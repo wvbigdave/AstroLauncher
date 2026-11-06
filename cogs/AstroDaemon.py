@@ -16,6 +16,8 @@ class AstroDaemon:
 
     @staticmethod
     def launch(executable, consolePID):
+        # Normalize the entry-point path so the argv entry is absolute.
+        entry = os.path.realpath(sys.argv[0])
         if executable:
             daemonCMD = [
                 sys.executable,
@@ -23,17 +25,17 @@ class AstroDaemon:
                 "-l",
                 str(os.getpid()),
                 "-c",
-                str(consolePID),
+                str(int(consolePID)),
             ]
         else:
             daemonCMD = [
                 sys.executable,
-                sys.argv[0],
+                entry,
                 "--daemon",
                 "-l",
                 str(os.getpid()),
                 "-c",
-                str(consolePID),
+                str(int(consolePID)),
             ]
         return subprocess.Popen(daemonCMD, shell=False, creationflags=get_detached_flags())
 

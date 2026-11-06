@@ -41,6 +41,8 @@ from cogs.cross_platform import (
     hide_console_window,
     is_admin,
     set_console_title,
+    validate_ini_path,
+    validate_server_path,
 )
 
 """
@@ -181,13 +183,21 @@ class AstroLauncher:
     def __init__(self, astroPath, launcherINI="Launcher.ini", disable_auto_update=None):
         try:
             AstroLogging.setup_logging()
-            self.launcherINI = launcherINI
+            # Canonicalize user-supplied paths once, at this boundary, so every
+            # downstream file operation uses an absolute, verified location.
+            self.launcherINI = validate_ini_path(launcherINI)
             self.launcherConfig = self.LauncherConfig()
             self.launcherPath = os.getcwd()
             self.refresh_launcher_config()
 
             # check if path specified
             if astroPath is not None:
+                try:
+                    astroPath = validate_server_path(astroPath)
+                except ValueError as exc:
+                    AstroLogging.logPrint(f"Invalid server path: {exc}", "critical")
+                    time.sleep(5)
+                    return
                 if os.path.exists(os.path.join(astroPath, "AstroServer.exe")):
                     self.astroPath = astroPath
                 else:
@@ -591,6 +601,11 @@ class AstroLauncher:
         except Exception:  # noqa: BLE001
             AstroLogging.logPrint("Could not determine if new update exists.", msgType="debug")
 
+    @staticmethod
+    def _ps_single_quote(value):
+        """Quote a value for a PowerShell single-quoted string literal."""
+        return "'" + str(value).replace("'", "''") + "'"
+
     def autoupdate_launcher(self, data):
         x = data
         downloadFolder = os.path.dirname(sys.executable)
@@ -599,35 +614,33 @@ class AstroLauncher:
             fileName = os.path.splitext(fileObj["name"])[0]
             downloadPath = os.path.join(downloadFolder, fileName)
 
+            newPath = downloadPath + "_new.exe"
+            finalPath = downloadPath + ".exe"
+            qUrl = self._ps_single_quote(downloadURL)
+            qNew = self._ps_single_quote(newPath)
+            qFinal = self._ps_single_quote(finalPath)
+
+            psScript = (
+                'Write-Host "Downloading latest AstroLauncher.exe.."; '
+                f"Wait-Process -Id {int(os.getpid())} -ErrorAction SilentlyContinue; "
+                "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; "
+                "$ProgressPreference = 'SilentlyContinue'; "
+                f"Invoke-WebRequest -Uri {qUrl} -OutFile {qNew}; "
+                f"Move-Item -Path {qNew} -Destination {qFinal} -Force; "
+                'Write-Host "Download complete!"; '
+                f"Start-Process {qFinal}"
+            )
             downloadCMD = [
                 "powershell",
-                "-executionpolicy",
-                "bypass",
-                "-command",
-                'Write-Host "Downloading latest AstroLauncher.exe..";',
-                "wait-process",
-                str(os.getpid()),
-                ";",
-                "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12;",
-                "$ProgressPreference = 'SilentlyContinue';",
-                "Invoke-WebRequest",
-                f"'{downloadURL}'",
-                "-OutFile",
-                f"'{downloadPath + '_new.exe'}'",
-                ";",
-                "Move-Item",
-                "-path",
-                f"'{downloadPath + '_new.exe'}'",
-                "-destination",
-                f"'{downloadPath + '.exe'}'",
-                "-Force;",
-                'Write-Host "Download complete!";',
-                "Start-Process",
-                f"'{downloadPath + '.exe'}'",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                psScript,
             ]
             subprocess.Popen(
                 downloadCMD,
-                shell=True,
+                shell=False,
                 creationflags=get_detached_flags(),
                 stdin=None,
                 stdout=None,

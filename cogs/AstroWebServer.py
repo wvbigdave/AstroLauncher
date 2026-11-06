@@ -121,8 +121,10 @@ class WebServer(tornado.web.Application):
             )
         else:
             self.listen(self.port)
+            # Localhost admin URL; HTTP is intentional for the local UI unless
+            # SSL is configured (EnableWebServerSSL) — no remote plaintext use.
             url = (
-                f"http://localhost{':' + str(self.port) if self.port != 80 else ''}"
+                f"http://localhost{':' + str(self.port) if self.port != 80 else ''}"  # NOSONAR
                 f"{self.baseURL + '/' if self.baseURL else ''}"
             )
         AstroLogging.logPrint(f"Running a web server at {url}")

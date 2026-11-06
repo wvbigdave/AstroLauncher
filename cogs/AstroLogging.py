@@ -3,9 +3,9 @@ levels 21/22 that AstroLogging registers on the root logger) and optional
 Discord webhook fan-out."""
 
 import gzip
+import hashlib
 import logging
 import os
-import random
 import shutil
 import sys
 from io import StringIO
@@ -145,8 +145,11 @@ class AstroLogging:
                 requestObj["content"] = message
                 requestObj["username"] = playerName
                 if playerName not in AstroLogging.discordWebhookAvatarDict:
-                    random.seed(playerName)
-                    playerNameTheme = random.choice(AstroLogging.avatarThemes)
+                    # Deterministic theme per player (hash, not a PRNG).
+                    idx = int(hashlib.sha256(str(playerName).encode()).hexdigest(), 16) % len(
+                        AstroLogging.avatarThemes
+                    )
+                    playerNameTheme = AstroLogging.avatarThemes[idx]
                     avatarURL = f"https://www.tinygraphs.com/squares/{playerName}?theme={playerNameTheme}&numcolors=4&size=220&fmt=png"
                     AstroLogging.discordWebhookAvatarDict[playerName] = avatarURL
                 requestObj["avatar_url"] = AstroLogging.discordWebhookAvatarDict[playerName]
