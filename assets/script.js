@@ -6,7 +6,7 @@ let playersTableOriginal = $("#onlinePlayersTable").html();
 let saveGamesTableOriginal = $("#saveGamesTable").html();
 
 let webSocket = null;
-const createWebSocket = async () => {
+const createWebSocket = () => {
     let WSprotocol = location.protocol == "https:" ? "wss" : "ws";
     webSocket = new WebSocket(
         WSprotocol + "://" + location.host + baseURL + "ws"
@@ -19,10 +19,12 @@ const createWebSocket = async () => {
     };
 };
 const checkWebSocket = async () => {
-    if (webSocket.readyState === WebSocket.CLOSED) {
+    if (!webSocket || webSocket.readyState === WebSocket.CLOSED) {
         try {
             createWebSocket();
-        } catch {}
+        } catch (err) {
+            console.error("WebSocket reconnect failed", err);
+        }
     }
 };
 createWebSocket();
@@ -272,9 +274,9 @@ const tick = async (data) => {
                         oldSaves.gameList = gameList;
                         gameList.forEach((sg, i) => {
                             let row = document.createElement("tr");
-                            sg.active == "Active"
-                                ? $(row).addClass("activeSave")
-                                : null;
+                            if (sg.active == "Active") {
+                                $(row).addClass("activeSave");
+                            }
                             row.innerHTML = `
                             <td class="d-md-none p-0 ${
                                 sg.active == "Active" ? "activeCell" : ""

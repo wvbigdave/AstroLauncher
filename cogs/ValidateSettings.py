@@ -155,22 +155,18 @@ def socket_server(port, secret, tcp):
         serversocket.bind(("0.0.0.0", port))
         if tcp:
             serversocket.listen(1)
-        while True:
-            connection = None
-            if tcp:
-                connection, _client_address = serversocket.accept()
-            while True:
-                if tcp:
-                    data = connection.recv(32)
-                else:
-                    data = serversocket.recv(32)
-                if data == secret:
-                    if tcp:
-                        connection.close()
-                    else:
-                        serversocket.close()
-                    return True
-                return False
+            connection, _client_address = serversocket.accept()
+            data = connection.recv(32)
+            matched = data == secret
+            connection.close()
+            return matched
+        # UDP: wait for the probe packet until the socket timeout expires.
+        data = serversocket.recv(32)
+        matched = data == secret
+        serversocket.close()
+        return matched
+    except (socket.timeout, OSError):
+        return False
     except Exception:  # noqa: BLE001
         return False
 
@@ -184,13 +180,15 @@ def socket_server2(port):
             [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
              0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08]
         )
-        while True:
-            data, address = serversocket.recvfrom(32)
-            if data == bytesData:
-                serversocket.sendto(b"Hello from AstroLauncher", address)
-                serversocket.close()
-                return True
-            return False
+        # Reply to the first matching query; give up on timeout.
+        data, address = serversocket.recvfrom(32)
+        if data == bytesData:
+            serversocket.sendto(b"Hello from AstroLauncher", address)
+            serversocket.close()
+            return True
+        return False
+    except (socket.timeout, OSError):
+        return False
     except Exception:  # noqa: BLE001
         return False
 

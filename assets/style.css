@@ -7,7 +7,7 @@
     src: url(lib/Roboto-Light.ttf);
 }
 * {
-    font-family: Roboto-Light;
+    font-family: Roboto-Light, sans-serif;
 }
 
 body {
@@ -160,7 +160,7 @@ h2 {
 .card-header .collapseArrows:after {
     content: "\f107";
     color: #fff;
-    font-family: "Font Awesome 5 Free";
+    font-family: "Font Awesome 5 Free", sans-serif;
     font-weight: 900;
 }
 .card-header[aria-expanded="true"] .collapseArrows::after {
