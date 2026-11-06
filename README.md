@@ -1,4 +1,4 @@
-![Python](https://img.shields.io/badge/Python-3-3776AB?logo=python&logoColor=white) ![github-fork](https://img.shields.io/badge/github-fork-181717?logo=github&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white) ![github-fork](https://img.shields.io/badge/github-fork-181717?logo=github&logoColor=white)
 
 [![Contributors][contributors-shield]][contributors-url]
 [![Forks][forks-shield]][forks-url]
@@ -9,19 +9,19 @@
 
 <br />
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JoeJoeTV/AstroLauncher/master/assets/astrolauncherlogo.ico" width="128px">
+  <img src="https://raw.githubusercontent.com/wvbigdave/AstroLauncher/master/assets/astrolauncherlogo.ico" width="128px">
   <h3 align="center">AstroLauncher - Dedicated Server Launcher</h3>
   <p align="center">
     An all-in-one server management tool for Astroneer Dedicated Servers.
   </p>
   <p align="center">
-    <b>This is a fork to fix some issues, since the <a href="https://github.com/ricky-davis/AstroLauncher">original repository</a> has been archived</b>
+    <b>This is a maintained fork. The <a href="https://github.com/ricky-davis/AstroLauncher">original repository</a> is archived, and the intermediate <a href="https://github.com/JoeJoeTV/AstroLauncher">JoeJoeTV fork</a> is the upstream this project derives from</b>
   </p>
 
   <p align="center">
-    <a href="https://github.com/JoeJoeTV/AstroLauncher/issues">AstroLauncher Bugs</a>
+    <a href="https://github.com/wvbigdave/AstroLauncher/issues">AstroLauncher Bugs</a>
     ·
-    <a href="https://github.com/JoeJoeTV/AstroLauncher/issues">Request Feature</a>
+    <a href="https://github.com/wvbigdave/AstroLauncher/issues">Request Feature</a>
   </p>
 </p>
 <img src = "https://user-images.githubusercontent.com/48695279/88715011-3bf09e80-d0e3-11ea-9c3e-f14e6c1758fe.png">
@@ -38,6 +38,7 @@
   - [Prerequisites](#prerequisites)
   - [Installation](#installation)
 - [Usage](#usage)
+  - [Running on Linux](#running-on-linux)
   - [Building an EXE](#building-an-exe)
 - [Contributing](#contributing)
 - [License](#license)
@@ -46,6 +47,8 @@
 ## Overview
 
 This tool is perfect for you if you are hosting your own dedicated server for Astroneer. It has many features to make hosting a lot easier like automatic restarts, advanced logging, and a webinterface.
+
+Runs on Windows natively, and on Linux (the Windows server binary is launched through Wine).
 
 ## What does it do?
 
@@ -181,7 +184,7 @@ CPUAffinity =
 
 ## Getting Started
 
-**Recommended: Most people will want to just run the .exe, check out the [Latest Release](https://github.com/JoeJoeTV/AstroLauncher/releases/latest) for a download of the executable.**
+**Recommended: Most people will want to just run the .exe, check out the [Latest Release](https://github.com/wvbigdave/AstroLauncher/releases/latest) for a download of the executable.**
 
 
 <br/>
@@ -191,15 +194,19 @@ To get a local "from-source" copy up and running follow these simple steps:
 
 ### Prerequisites
 
-- Python 3.7
-- pip / pipenv
+- Python 3.10 or newer (tested on 3.10, 3.12 and 3.14)
+- pip or pipenv
+
+> The Astroneer dedicated server itself (`AstroServer.exe`) is a Windows binary.
+> AstroLauncher runs natively on Windows and Linux; on Linux the launcher runs
+> the Windows server through Wine (see [Running on Linux](#running-on-linux)).
 
 ### Installation
 
 1. Clone the AstroLauncher repository
 
 ```sh
-git clone https://github.com/JoeJoeTV/AstroLauncher.git
+git clone https://github.com/wvbigdave/AstroLauncher.git
 ```
 
 2. Install python modules using pip or pipenv
@@ -235,9 +242,55 @@ python AstroLauncher.py --path "steamapps\common\ASTRONEER Dedicated Server"
 pipenv run python AstroLauncher.py -p "steamapps\common\ASTRONEER Dedicated Server"
 ```
 
+> Paths are passed through verbatim. Earlier versions lower-cased `--path`,
+> which broke case-sensitive (Linux) and non-default-case Windows installs.
+
+<br />
+
+### Running on Linux
+
+AstroLauncher is cross-platform, but the Astroneer dedicated server (`AstroServer.exe`)
+is a Windows-only binary. On Linux the launcher spawns the server through Wine.
+
+1. Install Wine and a virtual display (headless hosts):
+
+```sh
+sudo apt install wine wine64 xvfb
+```
+
+2. Install the server via SteamCMD. Because the app is Windows-only, force the
+   Windows platform or SteamCMD will fetch only the client sysroot:
+
+```sh
+steamcmd +@sSteamCmdForcePlatformType windows \
+         +force_install_dir "$HOME/astroneer-server" \
+         +login anonymous +app_update 728470 validate +quit
+```
+
+3. Run the launcher against that directory. Wine is invoked automatically:
+
+```sh
+xvfb-run -a python AstroLauncher.py -p "$HOME/astroneer-server"
+```
+
+Windows-only features degrade cleanly instead of failing: automatic `netsh`
+firewall rules, the PowerShell PlayFab certificate check, and the PowerShell
+self-updater are all skipped on Linux. Everything else — config baselining,
+RCON, PlayFab heartbeat/registration, the web UI, backups, and the watchdog
+daemon — behaves identically on both platforms.
+
+> If Wine cannot start the server on a minimal host (a common failure is the
+> process hanging before any UE log is written), a containerised Wine image that
+> wraps SteamCMD and a working prefix is the pragmatic alternative.
+
 <br />
 
 ### Building an EXE
+
+> The one-file executable is a Windows build artefact (PyInstaller `--add-data`
+> uses the `;` separator here). `Dockerfile` builds it on a Windows
+> `windowsservercore` image. Building from Linux needs the separator changed to
+> `:` (`--add-data "assets:./assets"`).
 
 1. If you want to turn this project into an executable, make sure to install pyinstaller using one of the following methods
 
@@ -292,21 +345,21 @@ Distributed under the MIT License. See `LICENSE` for more information.
 
 If you have any questions you can join the [Astroneer discord] (discord.gg/Astroneer) and ask in the #self_host_talk channel
 
-Project Link: [https://github.com/JoeJoeTV/AstroLauncher](https://github.com/JoeJoeTV/AstroLauncher)
+Project Link: [https://github.com/wvbigdave/AstroLauncher](https://github.com/wvbigdave/AstroLauncher)
 
 <!-- MARKDOWN LINKS & IMAGES -->
 <!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
 
 [astroneer discord]: https://discord.com/invite/astroneer
-[contributors-shield]: https://img.shields.io/github/contributors/JoeJoeTV/AstroLauncher.svg?style=flat-square
-[contributors-url]: https://github.com/JoeJoeTV/AstroLauncher/graphs/contributors
-[forks-shield]: https://img.shields.io/github/forks/JoeJoeTV/AstroLauncher.svg?style=flat-square
-[forks-url]: https://github.com/JoeJoeTV/AstroLauncher/network/members
-[downloads-shield]: https://img.shields.io/github/downloads/JoeJoeTV/AstroLauncher/total
-[downloads-url]: https://github.com/JoeJoeTV/AstroLauncher/releases/latest
-[stars-shield]: https://img.shields.io/github/stars/JoeJoeTV/AstroLauncher.svg?style=flat-square
-[stars-url]: https://github.com/JoeJoeTV/AstroLauncher/stargazers
-[issues-shield]: https://img.shields.io/github/issues/JoeJoeTV/AstroLauncher.svg?style=flat-square
-[issues-url]: https://github.com/JoeJoeTV/AstroLauncher/issues
-[license-shield]: https://img.shields.io/github/license/JoeJoeTV/AstroLauncher.svg?style=flat-square
-[license-url]: https://github.com/JoeJoeTV/AstroLauncher/blob/master/LICENSE.txt
+[contributors-shield]: https://img.shields.io/github/contributors/wvbigdave/AstroLauncher.svg?style=flat-square
+[contributors-url]: https://github.com/wvbigdave/AstroLauncher/graphs/contributors
+[forks-shield]: https://img.shields.io/github/forks/wvbigdave/AstroLauncher.svg?style=flat-square
+[forks-url]: https://github.com/wvbigdave/AstroLauncher/network/members
+[downloads-shield]: https://img.shields.io/github/downloads/wvbigdave/AstroLauncher/total
+[downloads-url]: https://github.com/wvbigdave/AstroLauncher/releases/latest
+[stars-shield]: https://img.shields.io/github/stars/wvbigdave/AstroLauncher.svg?style=flat-square
+[stars-url]: https://github.com/wvbigdave/AstroLauncher/stargazers
+[issues-shield]: https://img.shields.io/github/issues/wvbigdave/AstroLauncher.svg?style=flat-square
+[issues-url]: https://github.com/wvbigdave/AstroLauncher/issues
+[license-shield]: https://img.shields.io/github/license/wvbigdave/AstroLauncher.svg?style=flat-square
+[license-url]: https://github.com/wvbigdave/AstroLauncher/blob/master/LICENSE
