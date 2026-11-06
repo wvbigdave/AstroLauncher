@@ -18,6 +18,7 @@ import cogs.AstroAPI as AstroAPI
 import cogs.ValidateSettings as ValidateSettings
 from cogs.AstroLogging import AstroLogging
 from cogs.AstroRCON import AstroRCON
+from cogs.cross_platform import IS_WINDOWS
 
 
 class AstroDedicatedServer:
@@ -124,16 +125,25 @@ class AstroDedicatedServer:
         self.ipPortCombo = f"{self.settings.PublicIP}:{self.settings.Port}"
 
     def _server_executable(self):
-        # AstroServer.exe is Windows-only. On Linux a wine/container wrapper
-        # should expose the same relative path so configs stay identical.
+        # AstroServer.exe is Windows-only. On Linux the same server tree is
+        # run through Wine, so configs and paths stay identical across OSes.
         return os.path.join(self.astroPath, "AstroServer.exe")
 
+    def _server_launch_cmd(self):
+        """Build the argv used to spawn the dedicated server.
+
+        Windows runs AstroServer.exe directly. On Linux the server tree is the
+        same Windows build; we invoke it through Wine so the launcher operates
+        identically on both platforms.
+        """
+        exe = self._server_executable()
+        args = [] if self.launcher.launcherConfig.HideServerConsoleWindow else ["-log"]
+        if not IS_WINDOWS:
+            return ["wine", exe, *args]
+        return [exe, *args]
+
     def start(self):
-        if self.launcher.launcherConfig.HideServerConsoleWindow:
-            cmd = [self._server_executable()]
-        else:
-            cmd = [self._server_executable(), "-log"]
-        self.process = subprocess.Popen(cmd)
+        self.process = subprocess.Popen(self._server_launch_cmd(), cwd=self.astroPath)
 
     @staticmethod
     def convert_size(size_bytes):

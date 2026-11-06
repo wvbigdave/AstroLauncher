@@ -227,7 +227,10 @@ class AstroLauncher:
             if disable_auto_update is not None:
                 self.launcherConfig.AutoUpdateLauncherSoftware = not disable_auto_update
             self.version = ALVERSION
-            colsize = os.get_terminal_size().columns
+            try:
+                colsize = os.get_terminal_size().columns
+            except OSError:
+                colsize = 0
             if colsize >= 77:
                 vText = "Version " + self.version[1:]
                 print(
@@ -253,7 +256,12 @@ class AstroLauncher:
             if sys.argv[0] == os.path.splitext(bName)[0]:
                 self.isExecutable = True
             else:
-                self.isExecutable = os.path.samefile(sys.executable, sys.argv[0])
+                try:
+                    self.isExecutable = os.path.exists(sys.argv[0]) and os.path.samefile(
+                        sys.executable, sys.argv[0]
+                    )
+                except OSError:
+                    self.isExecutable = False
             self.cur_server_version = "0.0"
             self.headers = AstroAPI.base_headers
             self.DaemonProcess = None
@@ -379,6 +387,10 @@ class AstroLauncher:
         return settings
 
     def validate_playfab_certs(self):
+        # Windows-only: the PowerShell invocation checks a Windows trust store.
+        # On Linux the system CA store is used via ssl, so this is a no-op.
+        if os.name != "nt":
+            return
         try:
             AstroLogging.logPrint("Attempting to validate Playfab Certs")
             playfabRequestCommand = [
@@ -920,7 +932,7 @@ if __name__ == "__main__":
             "-l", "--launcherpid", help="Set the launcherPID for the Daemon", type=str.lower
         )
 
-        parser.add_argument("-p", "--path", help="Set the server folder path", type=str.lower)
+        parser.add_argument("-p", "--path", help="Set the server folder path")
         parser.add_argument(
             "-U",
             "--noupdate",

@@ -5,7 +5,7 @@ import ssl
 import urllib.error
 from urllib import request
 
-ALVERSION = "v1.8.5.1"
+ALVERSION = "v1.8.6.0"
 
 
 class AstroRequests:
